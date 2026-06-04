@@ -22,6 +22,8 @@ import {
 } from '../constants/options';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
+import { isSupabaseConfigured } from '../services/supabaseEnv';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import type { LookingFor, PresentationTag, SexualOrientation } from '../types';
 import type { PreferencesScreenProps } from '../navigation/types';
 import {
@@ -33,9 +35,11 @@ import {
 
 export function PreferencesScreen({ navigation, route }: PreferencesScreenProps) {
   const fromSettings = route.params?.fromSettings === true;
-  const { onboarding, preferences, updatePreferences } = useApp();
+  const { onboarding, preferences, updatePreferences, savePreferencesToServer } = useApp();
   const prefs = fromSettings ? preferences : onboarding.preferences;
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [ageRangeMin, setAgeRangeMin] = useState(prefs.ageRangeMin ?? 21);
   const [ageRangeMax, setAgeRangeMax] = useState(prefs.ageRangeMax ?? 40);
@@ -74,22 +78,28 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
       : null;
 
   const bannerMessages = useMemo(() => {
-    if (!submitAttempted) return [];
     const messages: string[] = [];
+    if (saveError) {
+      messages.push(saveError);
+    }
+    if (!submitAttempted) {
+      return messages;
+    }
     if (minHeightError) messages.push(`Min height: ${minHeightError}`);
     if (maxHeightError) messages.push(`Max height: ${maxHeightError}`);
     if (rangeOrderError) messages.push(rangeOrderError);
     return messages;
-  }, [submitAttempted, minHeightError, maxHeightError, rangeOrderError]);
+  }, [submitAttempted, minHeightError, maxHeightError, rangeOrderError, saveError]);
 
   const showHeightErrors = submitAttempted;
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     setSubmitAttempted(true);
+    setSaveError(null);
 
     if (minHeightError || maxHeightError || rangeOrderError) return;
 
-    updatePreferences({
+    const prefsUpdate = {
       ageRangeMin,
       ageRangeMax,
       heightMinInches: parsedMin!,
@@ -101,7 +111,21 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
       preferredPresentationTags,
       dealbreakers,
       niceToHaves,
-    });
+    };
+
+    updatePreferences(prefsUpdate);
+
+    if (isSupabaseConfigured) {
+      setIsSaving(true);
+      try {
+        await savePreferencesToServer(prefsUpdate);
+      } catch (error) {
+        setSaveError(formatAuthErrorForUser(error));
+        setIsSaving(false);
+        return;
+      }
+      setIsSaving(false);
+    }
 
     if (fromSettings) {
       navigation.goBack();
@@ -246,6 +270,8 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
         onPress={handleContinue}
         size="lg"
         style={styles.btn}
+        loading={isSaving}
+        disabled={isSaving}
       />
       {!fromSettings && (
         <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />

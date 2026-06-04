@@ -175,8 +175,12 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
       setIsSubmitting(true);
       try {
         const session = await signIn({ email: email.trim(), password });
-        const onboarded = await syncFromSupabase(session.user.id);
-        navigation.replace(onboarded ? 'SpeedDateLobby' : 'ProfileCreation');
+        const { nextRoute } = await syncFromSupabase(session.user.id);
+        if (nextRoute === 'Verification') {
+          navigation.replace('Verification', { context: 'onboarding' });
+        } else {
+          navigation.replace(nextRoute);
+        }
       } catch (error) {
         showAuthError(error, 'AuthScreen.login', 'Log in failed');
       } finally {
@@ -248,8 +252,12 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
 
         markLoggedIn();
         try {
-          const onboarded = await syncFromSupabase(result.user.id);
-          navigation.replace(onboarded ? 'SpeedDateLobby' : 'ProfileCreation');
+          const { nextRoute } = await syncFromSupabase(result.user.id);
+          if (nextRoute === 'Verification') {
+            navigation.replace('Verification', { context: 'onboarding' });
+          } else {
+            navigation.replace(nextRoute);
+          }
         } catch (syncError) {
           showAuthError(syncError, 'AuthScreen.syncAfterSignUp', 'Could not load profile');
         }

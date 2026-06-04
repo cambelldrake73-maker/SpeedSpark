@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../constants/theme';
+import { NavigationGate, navigationRef } from './NavigationGate';
 import type { RootStackParamList } from './types';
 import {
   WelcomeScreen,
@@ -37,7 +38,8 @@ const screenOptions = {
 export function RootNavigator() {
   return (
     <View style={styles.root}>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
+      <NavigationGate />
       <Stack.Navigator initialRouteName="Welcome" screenOptions={screenOptions}>
         <Stack.Screen name="Welcome" component={WelcomeScreen} />
         <Stack.Screen name="Auth" component={AuthScreen} />

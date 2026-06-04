@@ -1,14 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, OnboardingStep, ScreenContainer } from '../components';
+import { Button, FormErrorBanner, OnboardingStep, ScreenContainer } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import type { VerificationScreenProps } from '../navigation/types';
 
 export function VerificationScreen({ navigation, route }: VerificationScreenProps) {
   const { completeOnboarding, verifyForWindow } = useApp();
   const isWindowCheck = route.params?.context === 'window';
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const handleContinue = async () => {
     if (isWindowCheck) {
@@ -16,8 +19,17 @@ export function VerificationScreen({ navigation, route }: VerificationScreenProp
       navigation.goBack();
       return;
     }
-    await completeOnboarding();
-    navigation.replace('SpeedDateLobby');
+
+    setSaveError(null);
+    setIsSaving(true);
+    try {
+      await completeOnboarding();
+      navigation.replace('SpeedDateLobby');
+    } catch (error) {
+      setSaveError(formatAuthErrorForUser(error));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -73,10 +85,13 @@ export function VerificationScreen({ navigation, route }: VerificationScreenProp
         </Text>
       </View>
 
+      <FormErrorBanner messages={saveError ? [saveError] : []} />
       <Button
         title={isWindowCheck ? 'Complete check & return to lobby' : 'Enter the lobby (demo)'}
         onPress={handleContinue}
         size="lg"
+        loading={isSaving}
+        disabled={isSaving}
       />
       {!isWindowCheck && (
         <Button
@@ -91,6 +106,7 @@ export function VerificationScreen({ navigation, route }: VerificationScreenProp
         title="Back"
         onPress={() => navigation.goBack()}
         variant="ghost"
+        disabled={isSaving}
       />
     </ScreenContainer>
   );

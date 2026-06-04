@@ -14,11 +14,19 @@ import {
   fetchPreferences,
   fetchProfile,
   isSupabaseConfigured,
+  markOnboardingComplete,
   requireSupabase,
+  savePreferencesFields,
+  saveProfileFields,
   unblockUserInSupabase,
-  upsertPreferences,
-  upsertProfile,
 } from '../services';
+import {
+  isPreferencesComplete,
+  isProfileComplete,
+  resolveOnboardingRoute,
+  type OnboardingRoute,
+} from '../utils/onboardingStatus';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import {
   logSupabaseError,
   logSupabaseRequest,
@@ -50,7 +58,12 @@ interface AppContextValue {
   login: () => void;
   logout: () => void;
   deleteAccount: () => void;
-  syncFromSupabase: (userId: string) => Promise<boolean>;
+  syncFromSupabase: (userId: string) => Promise<SyncFromSupabaseResult>;
+  saveProfileToServer: (profile: Partial<UserProfile>) => Promise<UserProfile>;
+  savePreferencesToServer: (prefs: Partial<DatingPreferences>) => Promise<Partial<DatingPreferences>>;
+  isHydrating: boolean;
+  hydrationError: string | null;
+  clearHydrationError: () => void;
   textNotificationsEnabled: boolean;
   setTextNotificationsEnabled: (enabled: boolean) => void;
   blockedUsers: BlockedUser[];
@@ -75,6 +88,13 @@ const defaultPreferences: Partial<DatingPreferences> = {
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
+export interface SyncFromSupabaseResult {
+  onboarded: boolean;
+  profileComplete: boolean;
+  preferencesComplete: boolean;
+  nextRoute: OnboardingRoute;
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<UserProfile>(MOCK_CURRENT_USER);
   const [preferences, setPreferences] =
@@ -91,6 +111,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [windowIdentityVerified, setWindowIdentityVerified] = useState(false);
   const [textNotificationsEnabled, setTextNotificationsEnabled] = useState(true);
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [isHydrating, setIsHydrating] = useState(false);
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
+
+  const clearHydrationError = useCallback(() => {
+    setHydrationError(null);
+  }, []);
 
   const verifyForWindow = useCallback(() => {
     setWindowIdentityVerified(true);
@@ -154,10 +180,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextPreferences = onboarding.preferences;
 
     if (isSupabaseConfigured && profile.id && profile.id !== 'user-1') {
-      const savedProfile = await upsertProfile(profile.id, profile);
-      await upsertPreferences(profile.id, nextPreferences);
+      const names = onboarding.account
+        ? {
+            firstName: onboarding.account.firstName,
+            lastName: onboarding.account.lastName,
+          }
+        : undefined;
+      const savedProfile = await saveProfileFields(profile.id, profile, names);
+      const savedPrefs = await savePreferencesFields(profile.id, nextPreferences);
+      await markOnboardingComplete(profile.id);
       setCurrentUser(savedProfile);
-      setPreferences(nextPreferences);
+      setPreferences(savedPrefs);
     } else {
       setCurrentUser({
         ...profile,
@@ -172,13 +205,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setWindowIdentityVerified(false);
   }, [onboarding]);
 
+  const saveProfileToServer = useCallback(
+    async (profile: Partial<UserProfile>) => {
+      const userId = profile.id ?? onboarding.profile.id;
+      if (!isSupabaseConfigured || !userId || userId === 'user-1') {
+        updateProfile(profile);
+        return { ...onboarding.profile, ...profile } as UserProfile;
+      }
+
+      const names = onboarding.account
+        ? {
+            firstName: onboarding.account.firstName,
+            lastName: onboarding.account.lastName,
+          }
+        : undefined;
+      const saved = await saveProfileFields(userId, profile, names);
+      setCurrentUser(saved);
+      setOnboarding((prev) => ({ ...prev, profile: saved }));
+      return saved;
+    },
+    [onboarding.account, onboarding.profile.id, updateProfile],
+  );
+
+  const savePreferencesToServer = useCallback(
+    async (prefs: Partial<DatingPreferences>) => {
+      const userId = currentUser.id || onboarding.profile.id;
+      if (!isSupabaseConfigured || !userId || userId === 'user-1') {
+        updatePreferences(prefs);
+        return { ...preferences, ...prefs };
+      }
+
+      const saved = await savePreferencesFields(userId, prefs);
+      setPreferences(saved);
+      setOnboarding((prev) => ({ ...prev, preferences: saved }));
+      return saved;
+    },
+    [currentUser.id, onboarding.profile.id, preferences, updatePreferences],
+  );
+
   const markLoggedIn = useCallback(() => {
     setIsLoggedIn(true);
   }, []);
 
-  const syncFromSupabase = useCallback(async (userId: string) => {
+  const syncFromSupabase = useCallback(async (userId: string): Promise<SyncFromSupabaseResult> => {
     const op = 'app.syncFromSupabase';
     logSupabaseRequest(op, { userId });
+    setIsHydrating(true);
+    setHydrationError(null);
 
     try {
       const profile = await fetchProfile(userId);
@@ -188,6 +261,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const prefs = await fetchPreferences(userId);
+      const mergedPrefs = prefs ?? defaultPreferences;
       if (prefs) {
         setPreferences(prefs);
         setOnboarding((prev) => ({ ...prev, preferences: prefs }));
@@ -211,6 +285,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const onboarded = Boolean(
         (profileRow as { onboarded_at?: string | null } | null)?.onboarded_at,
       );
+      const activeProfile = profile ?? onboarding.profile;
+      const profileComplete = isProfileComplete(activeProfile);
+      const preferencesComplete = isPreferencesComplete(mergedPrefs);
+      const nextRoute = resolveOnboardingRoute({
+        isOnboarded: onboarded,
+        profile: activeProfile,
+        preferences: mergedPrefs,
+      });
+
       setIsOnboarded(onboarded);
       setIsLoggedIn(true);
       setTextNotificationsEnabled(
@@ -218,13 +301,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ?.text_notifications_enabled ?? true,
       );
 
-      console.log('[SpeedSpark Supabase] ✓ app.syncFromSupabase', { userId, onboarded });
-      return onboarded;
+      console.log('[SpeedSpark Supabase] ✓ app.syncFromSupabase', {
+        userId,
+        onboarded,
+        profileComplete,
+        preferencesComplete,
+        nextRoute,
+      });
+
+      return { onboarded, profileComplete, preferencesComplete, nextRoute };
     } catch (error) {
       logSupabaseError(op, error);
+      setHydrationError(formatAuthErrorForUser(error));
       throw error;
+    } finally {
+      setIsHydrating(false);
     }
-  }, []);
+  }, [onboarding.profile]);
 
   // Demo fast-path login when not using Supabase email auth
   const login = useCallback(() => {
@@ -336,6 +429,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         logout,
         deleteAccount,
         syncFromSupabase,
+        saveProfileToServer,
+        savePreferencesToServer,
+        isHydrating,
+        hydrationError,
+        clearHydrationError,
         textNotificationsEnabled,
         setTextNotificationsEnabled,
         blockedUsers,

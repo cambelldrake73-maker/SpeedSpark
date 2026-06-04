@@ -24,6 +24,9 @@ import {
 } from '../constants/options';
 import { spacing } from '../constants/theme';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { isSupabaseConfigured } from '../services/supabaseEnv';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import type {
   GenderIdentity,
   LookingFor,
@@ -49,20 +52,24 @@ type ProfileField =
   | 'height'
   | 'lookingFor';
 
-function getProfileValidation(input: {
-  name: string;
-  age: string;
-  deviceLocation: ResolvedLocation | null;
-  heightFeet: string;
-  heightInches: string;
-  lookingFor: LookingFor[];
-  photos: string[];
-}) {
+function getProfileValidation(
+  input: {
+    name: string;
+    age: string;
+    deviceLocation: ResolvedLocation | null;
+    heightFeet: string;
+    heightInches: string;
+    lookingFor: LookingFor[];
+    photos: string[];
+  },
+  options?: { requirePhotos?: boolean },
+) {
+  const requirePhotos = options?.requirePhotos ?? true;
   const errors: Partial<Record<ProfileField, string>> = {};
   const banner: string[] = [];
 
   const photoCount = input.photos.filter(Boolean).length;
-  if (photoCount < REQUIRED_PHOTOS) {
+  if (requirePhotos && photoCount < REQUIRED_PHOTOS) {
     const message = `Add at least ${REQUIRED_PHOTOS} photos (${photoCount}/${REQUIRED_PHOTOS} added)`;
     errors.photos = message;
     banner.push(message);
@@ -99,9 +106,13 @@ function getProfileValidation(input: {
 }
 
 export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps) {
-  const { onboarding, updateProfile } = useApp();
+  const { onboarding, updateProfile, saveProfileToServer } = useApp();
+  const { session } = useAuth();
   const profile = onboarding.profile;
+  const skipPhotos = isSupabaseConfigured;
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [name, setName] = useState(profile.name ?? '');
   const [age, setAge] = useState(profile.age ? String(profile.age) : '');
@@ -144,7 +155,38 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
 
   const validation = useMemo(
     () =>
-      getProfileValidation({
+      getProfileValidation(
+        {
+          name,
+          age,
+          deviceLocation,
+          heightFeet,
+          heightInches,
+          lookingFor,
+          photos,
+        },
+        { requirePhotos: !skipPhotos },
+      ),
+    [name, age, deviceLocation, heightFeet, heightInches, lookingFor, photos, skipPhotos],
+  );
+
+  const showErrors = submitAttempted;
+  const fieldErrors = showErrors ? validation.errors : {};
+  const bannerMessages = [
+    ...(showErrors ? validation.banner : []),
+    ...(saveError ? [saveError] : []),
+  ];
+
+  const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
+    setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  };
+
+  const handleContinue = async () => {
+    setSubmitAttempted(true);
+    setSaveError(null);
+
+    const result = getProfileValidation(
+      {
         name,
         age,
         deviceLocation,
@@ -152,37 +194,18 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
         heightInches,
         lookingFor,
         photos,
-      }),
-    [name, age, deviceLocation, heightFeet, heightInches, lookingFor, photos],
-  );
-
-  const showErrors = submitAttempted;
-  const fieldErrors = showErrors ? validation.errors : {};
-  const bannerMessages = showErrors ? validation.banner : [];
-
-  const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
-    setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
-  };
-
-  const handleContinue = () => {
-    setSubmitAttempted(true);
-
-    const result = getProfileValidation({
-      name,
-      age,
-      deviceLocation,
-      heightFeet,
-      heightInches,
-      lookingFor,
-      photos,
-    });
+      },
+      { requirePhotos: !skipPhotos },
+    );
 
     if (result.banner.length > 0) return;
 
     const ageNum = parseInt(age, 10);
     const parsedHeight = parseFeetInchesFields(heightFeet, heightInches)!;
+    const userId = profile.id || session?.user?.id;
 
-    updateProfile({
+    const profileUpdates = {
+      id: userId,
       name: name.trim(),
       age: ageNum,
       location: deviceLocation!.label,
@@ -197,7 +220,23 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
       presentationTags,
       personalityTags,
       lifestyleTags,
-    });
+    };
+
+    updateProfile(profileUpdates);
+
+    if (skipPhotos && userId) {
+      setIsSaving(true);
+      try {
+        await saveProfileToServer(profileUpdates);
+        navigation.navigate('Preferences');
+      } catch (error) {
+        setSaveError(formatAuthErrorForUser(error));
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
     navigation.navigate('Preferences');
   };
 
@@ -220,13 +259,17 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
       <SectionHeader
         title="Photos"
         hint={
-          showErrors
-            ? undefined
-            : `Add at least ${REQUIRED_PHOTOS} photos — tap any slot to upload or take a picture`
+          skipPhotos
+            ? 'Photo upload coming soon — finish the fields below to continue'
+            : showErrors
+              ? undefined
+              : `Add at least ${REQUIRED_PHOTOS} photos — tap any slot to upload or take a picture`
         }
         error={fieldErrors.photos}
       />
-      <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
+      {!skipPhotos ? (
+        <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
+      ) : null}
 
       <SectionHeader title="Basics" />
       <Input
@@ -322,7 +365,14 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
       />
 
       <FormErrorBanner messages={bannerMessages} />
-      <Button title="Continue to match preferences" onPress={handleContinue} size="lg" style={styles.btn} />
+      <Button
+        title="Continue to match preferences"
+        onPress={handleContinue}
+        size="lg"
+        style={styles.btn}
+        loading={isSaving}
+        disabled={isSaving}
+      />
       <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />
     </ScreenContainer>
   );

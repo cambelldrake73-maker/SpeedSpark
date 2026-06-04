@@ -15,6 +15,11 @@ import {
 } from '../utils/supabaseDebug';
 import { isSupabaseConfigured, requireSupabase } from './supabase';
 
+export interface ProfileNameFields {
+  firstName?: string;
+  lastName?: string;
+}
+
 function mapProfileRow(row: ProfileRow, photos: string[] = []): UserProfile {
   return {
     id: row.id,
@@ -52,6 +57,110 @@ function mapPreferencesRow(row: DatingPreferencesRow): Partial<DatingPreferences
   };
 }
 
+function buildProfileUpdatePayload(
+  profile: Partial<UserProfile>,
+  names?: ProfileNameFields,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (names?.firstName !== undefined) {
+    payload.first_name = names.firstName;
+  }
+  if (names?.lastName !== undefined) {
+    payload.last_name = names.lastName;
+  }
+  if (profile.name !== undefined) {
+    payload.display_name = profile.name;
+  }
+  if (profile.age !== undefined) {
+    payload.age = profile.age;
+  }
+  if (profile.heightInches !== undefined) {
+    payload.height_inches = profile.heightInches;
+  }
+  if (profile.location !== undefined) {
+    payload.location_label = profile.location;
+  }
+  if (profile.locationLatitude !== undefined) {
+    payload.location_latitude = profile.locationLatitude ?? null;
+  }
+  if (profile.locationLongitude !== undefined) {
+    payload.location_longitude = profile.locationLongitude ?? null;
+  }
+  if (profile.genderIdentity !== undefined) {
+    payload.gender_identity = profile.genderIdentity;
+  }
+  if (profile.sexualOrientation !== undefined) {
+    payload.sexual_orientation = profile.sexualOrientation;
+  }
+  if (profile.lookingFor !== undefined) {
+    payload.looking_for = profile.lookingFor;
+  }
+  if (profile.queerRoles !== undefined) {
+    payload.queer_roles = profile.queerRoles;
+  }
+  if (profile.presentationTags !== undefined) {
+    payload.presentation_tags = profile.presentationTags;
+  }
+  if (profile.personalityTags !== undefined) {
+    payload.personality_tags = profile.personalityTags;
+  }
+  if (profile.lifestyleTags !== undefined) {
+    payload.lifestyle_tags = profile.lifestyleTags;
+  }
+  if (profile.verificationStatus !== undefined) {
+    payload.verification_status = profile.verificationStatus;
+  }
+
+  return payload;
+}
+
+function buildPreferencesUpdatePayload(
+  preferences: Partial<DatingPreferences>,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    updated_at: new Date().toISOString(),
+  };
+
+  if (preferences.ageRangeMin !== undefined) {
+    payload.age_range_min = preferences.ageRangeMin;
+  }
+  if (preferences.ageRangeMax !== undefined) {
+    payload.age_range_max = preferences.ageRangeMax;
+  }
+  if (preferences.heightMinInches !== undefined) {
+    payload.height_min_inches = preferences.heightMinInches;
+  }
+  if (preferences.heightMaxInches !== undefined) {
+    payload.height_max_inches = preferences.heightMaxInches;
+  }
+  if (preferences.maxDistanceMiles !== undefined) {
+    payload.max_distance_miles = preferences.maxDistanceMiles;
+  }
+  if (preferences.preferredOrientations !== undefined) {
+    payload.preferred_orientations = preferences.preferredOrientations;
+  }
+  if (preferences.preferredLookingFor !== undefined) {
+    payload.preferred_looking_for = preferences.preferredLookingFor;
+  }
+  if (preferences.preferredQueerRoles !== undefined) {
+    payload.preferred_queer_roles = preferences.preferredQueerRoles;
+  }
+  if (preferences.preferredPresentationTags !== undefined) {
+    payload.preferred_presentation_tags = preferences.preferredPresentationTags;
+  }
+  if (preferences.dealbreakers !== undefined) {
+    payload.dealbreakers = preferences.dealbreakers;
+  }
+  if (preferences.niceToHaves !== undefined) {
+    payload.nice_to_haves = preferences.niceToHaves;
+  }
+
+  return payload;
+}
+
 export async function fetchProfile(userId: string): Promise<UserProfile | null> {
   if (!isSupabaseConfigured) {
     return null;
@@ -59,38 +168,25 @@ export async function fetchProfile(userId: string): Promise<UserProfile | null> 
 
   const client = requireSupabase();
   const profileOp = 'profiles.select';
-  const photosOp = 'profile_photos.select';
 
   logSupabaseRequest(profileOp, { userId });
-  logSupabaseRequest(photosOp, { userId });
 
-  const [{ data: profile, error: profileError }, { data: photos, error: photosError }] =
-    await Promise.all([
-      client.from('profiles').select('*').eq('id', userId).maybeSingle(),
-      client
-        .from('profile_photos')
-        .select('public_url, sort_order')
-        .eq('user_id', userId)
-        .order('sort_order', { ascending: true }),
-    ]);
+  const { data: profile, error: profileError } = await client
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
 
   if (profileError) {
     throwSupabaseError(profileOp, profileError);
-  }
-  if (photosError) {
-    throwSupabaseError(photosOp, photosError);
   }
   if (!profile) {
     console.log('[SpeedSpark Supabase] ✓ profiles.select (no row yet)', { userId });
     return null;
   }
 
-  const photoUrls = (photos ?? [])
-    .map((photo) => photo.public_url)
-    .filter((url): url is string => Boolean(url));
-
-  console.log('[SpeedSpark Supabase] ✓ profiles.select', { userId, photoCount: photoUrls.length });
-  return mapProfileRow(profile as ProfileRow, photoUrls);
+  console.log('[SpeedSpark Supabase] ✓ profiles.select', { userId });
+  return mapProfileRow(profile as ProfileRow, []);
 }
 
 export async function fetchPreferences(userId: string): Promise<Partial<DatingPreferences> | null> {
@@ -119,71 +215,22 @@ export async function fetchPreferences(userId: string): Promise<Partial<DatingPr
   return mapPreferencesRow(data as DatingPreferencesRow);
 }
 
-export async function upsertProfile(
+/** Saves profile fields without marking onboarding complete. */
+export async function saveProfileFields(
   userId: string,
   profile: Partial<UserProfile>,
+  names?: ProfileNameFields,
 ): Promise<UserProfile> {
   const client = requireSupabase();
-  const op = 'profiles.upsert';
-
-  const payload = {
-    id: userId,
-    display_name: profile.name,
-    age: profile.age,
-    height_inches: profile.heightInches,
-    location_label: profile.location,
-    location_latitude: profile.locationLatitude ?? null,
-    location_longitude: profile.locationLongitude ?? null,
-    gender_identity: profile.genderIdentity,
-    sexual_orientation: profile.sexualOrientation,
-    looking_for: profile.lookingFor,
-    queer_roles: profile.queerRoles,
-    presentation_tags: profile.presentationTags,
-    personality_tags: profile.personalityTags,
-    lifestyle_tags: profile.lifestyleTags,
-    verification_status: profile.verificationStatus,
-    onboarded_at: new Date().toISOString(),
-  };
+  const op = 'profiles.update';
+  const payload = buildProfileUpdatePayload(profile, names);
 
   logSupabaseRequest(op, { userId, fields: Object.keys(payload) });
 
-  const { data, error } = await client.from('profiles').upsert(payload).select('*').single();
-
-  if (error) {
-    throwSupabaseError(op, error);
-  }
-
-  console.log('[SpeedSpark Supabase] ✓ profiles.upsert', { userId });
-  return mapProfileRow(data as ProfileRow, profile.photos ?? []);
-}
-
-export async function upsertPreferences(
-  userId: string,
-  preferences: Partial<DatingPreferences>,
-): Promise<Partial<DatingPreferences>> {
-  const client = requireSupabase();
-  const op = 'dating_preferences.upsert';
-
-  const payload = {
-    user_id: userId,
-    age_range_min: preferences.ageRangeMin,
-    age_range_max: preferences.ageRangeMax,
-    height_min_inches: preferences.heightMinInches,
-    height_max_inches: preferences.heightMaxInches,
-    max_distance_miles: preferences.maxDistanceMiles,
-    preferred_orientations: preferences.preferredOrientations,
-    preferred_looking_for: preferences.preferredLookingFor,
-    preferred_queer_roles: preferences.preferredQueerRoles,
-    preferred_presentation_tags: preferences.preferredPresentationTags,
-    dealbreakers: preferences.dealbreakers,
-    nice_to_haves: preferences.niceToHaves,
-  };
-
-  logSupabaseRequest(op, { userId });
-
   const { data, error } = await client
-    .from('dating_preferences')
-    .upsert(payload)
+    .from('profiles')
+    .update(payload)
+    .eq('id', userId)
     .select('*')
     .single();
 
@@ -191,8 +238,72 @@ export async function upsertPreferences(
     throwSupabaseError(op, error);
   }
 
-  console.log('[SpeedSpark Supabase] ✓ dating_preferences.upsert', { userId });
+  console.log('[SpeedSpark Supabase] ✓ profiles.update', { userId });
+  return mapProfileRow(data as ProfileRow, profile.photos ?? []);
+}
+
+/** Saves dating preference fields. */
+export async function savePreferencesFields(
+  userId: string,
+  preferences: Partial<DatingPreferences>,
+): Promise<Partial<DatingPreferences>> {
+  const client = requireSupabase();
+  const op = 'dating_preferences.update';
+  const payload = buildPreferencesUpdatePayload(preferences);
+
+  logSupabaseRequest(op, { userId, fields: Object.keys(payload) });
+
+  const { data, error } = await client
+    .from('dating_preferences')
+    .update(payload)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throwSupabaseError(op, error);
+  }
+
+  console.log('[SpeedSpark Supabase] ✓ dating_preferences.update', { userId });
   return mapPreferencesRow(data as DatingPreferencesRow);
+}
+
+/** Marks onboarding finished (user may enter the lobby). */
+export async function markOnboardingComplete(userId: string): Promise<void> {
+  const op = 'profiles.markOnboarded';
+  logSupabaseRequest(op, { userId });
+
+  const { error } = await requireSupabase()
+    .from('profiles')
+    .update({
+      onboarded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', userId);
+
+  if (error) {
+    throwSupabaseError(op, error);
+  }
+
+  console.log('[SpeedSpark Supabase] ✓ profiles.markOnboarded', { userId });
+}
+
+/** Final onboarding save: profile + preferences + onboarded_at. */
+export async function upsertProfile(
+  userId: string,
+  profile: Partial<UserProfile>,
+  names?: ProfileNameFields,
+): Promise<UserProfile> {
+  const saved = await saveProfileFields(userId, profile, names);
+  await markOnboardingComplete(userId);
+  return saved;
+}
+
+export async function upsertPreferences(
+  userId: string,
+  preferences: Partial<DatingPreferences>,
+): Promise<Partial<DatingPreferences>> {
+  return savePreferencesFields(userId, preferences);
 }
 
 export async function updateTextNotificationsEnabled(
