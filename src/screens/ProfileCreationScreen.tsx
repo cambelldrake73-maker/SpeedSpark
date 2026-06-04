@@ -1,39 +1,129 @@
-import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { StyleSheet } from 'react-native';
 import {
   Button,
+  ChipGrid,
+  FormErrorBanner,
+  HeightFields,
   Input,
+  LocationSetting,
+  OnboardingStep,
   PhotoPickerPlaceholder,
-  ProgressBar,
   ScreenContainer,
+  SectionHeader,
   TagSelector,
+  BrandLogo,
 } from '../components';
 import {
   GENDER_OPTIONS,
-  HEIGHT_OPTIONS,
+  LIFESTYLE_TAG_OPTIONS,
   LOOKING_FOR_OPTIONS,
   ORIENTATION_OPTIONS,
   PERSONALITY_TAGS,
-  QUEER_PREFERENCE_OPTIONS,
+  PRESENTATION_OPTIONS,
 } from '../constants/options';
-import { colors, spacing, typography } from '../constants/theme';
+import { spacing } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import type {
   GenderIdentity,
   LookingFor,
-  QueerPreference,
+  PresentationTag,
   SexualOrientation,
 } from '../types';
 import type { ProfileCreationScreenProps } from '../navigation/types';
+import {
+  inchesToFeetInches,
+  parseFeetInchesFields,
+  validateFeetInchesFields,
+} from '../utils/heightFormat';
+import type { ResolvedLocation } from '../utils/deviceLocation';
+
+const MAX_PHOTOS = 6;
+const REQUIRED_PHOTOS = 3;
+
+type ProfileField =
+  | 'photos'
+  | 'name'
+  | 'age'
+  | 'location'
+  | 'height'
+  | 'lookingFor';
+
+function getProfileValidation(input: {
+  name: string;
+  age: string;
+  deviceLocation: ResolvedLocation | null;
+  heightFeet: string;
+  heightInches: string;
+  lookingFor: LookingFor[];
+  photos: string[];
+}) {
+  const errors: Partial<Record<ProfileField, string>> = {};
+  const banner: string[] = [];
+
+  const photoCount = input.photos.filter(Boolean).length;
+  if (photoCount < REQUIRED_PHOTOS) {
+    const message = `Add at least ${REQUIRED_PHOTOS} photos (${photoCount}/${REQUIRED_PHOTOS} added)`;
+    errors.photos = message;
+    banner.push(message);
+  }
+
+  if (!input.name.trim()) {
+    errors.name = 'Enter your name';
+    banner.push('Enter your name');
+  }
+
+  const ageNum = parseInt(input.age, 10);
+  if (!ageNum || ageNum < 18) {
+    errors.age = 'Enter an age of 18 or older';
+    banner.push('Enter an age of 18 or older');
+  }
+
+  if (!input.deviceLocation) {
+    errors.location = 'Tap "Use my location" to set your city';
+    banner.push('Set your location with "Use my location"');
+  }
+
+  const heightError = validateFeetInchesFields(input.heightFeet, input.heightInches);
+  if (heightError) {
+    errors.height = heightError;
+    banner.push(heightError);
+  }
+
+  if (input.lookingFor.length === 0) {
+    errors.lookingFor = 'Select at least one option';
+    banner.push('Select at least one "Looking for" option');
+  }
+
+  return { errors, banner };
+}
 
 export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps) {
   const { onboarding, updateProfile } = useApp();
   const profile = onboarding.profile;
 
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [name, setName] = useState(profile.name ?? '');
   const [age, setAge] = useState(profile.age ? String(profile.age) : '');
-  const [location, setLocation] = useState(profile.location ?? '');
-  const [heightInches, setHeightInches] = useState(profile.heightInches ?? 66);
+  const [deviceLocation, setDeviceLocation] = useState<ResolvedLocation | null>(() => {
+    if (
+      profile.location &&
+      profile.locationLatitude != null &&
+      profile.locationLongitude != null
+    ) {
+      return {
+        label: profile.location,
+        latitude: profile.locationLatitude,
+        longitude: profile.locationLongitude,
+      };
+    }
+    return null;
+  });
+  const initialHeight = profile.heightInches
+    ? inchesToFeetInches(profile.heightInches)
+    : { feet: '', inches: '' };
+  const [heightFeet, setHeightFeet] = useState(initialHeight.feet);
+  const [heightInches, setHeightInches] = useState(initialHeight.inches);
   const [genderIdentity, setGenderIdentity] = useState<GenderIdentity>(
     profile.genderIdentity ?? 'prefer_not_to_say',
   );
@@ -41,98 +131,137 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
     profile.sexualOrientation ?? 'prefer_not_to_say',
   );
   const [lookingFor, setLookingFor] = useState<LookingFor[]>(profile.lookingFor ?? []);
-  const [queerPreferences, setQueerPreferences] = useState<QueerPreference[]>(
-    profile.queerPreferences ?? [],
+  const [presentationTags, setPresentationTags] = useState<PresentationTag[]>(
+    profile.presentationTags ?? [],
   );
   const [personalityTags, setPersonalityTags] = useState<string[]>(
     profile.personalityTags ?? [],
   );
-  const [photos] = useState<string[]>(profile.photos ?? []);
+  const [lifestyleTags, setLifestyleTags] = useState<string[]>(profile.lifestyleTags ?? []);
+  const [photos, setPhotos] = useState<string[]>(() =>
+    Array.from({ length: MAX_PHOTOS }, (_, i) => profile.photos?.[i] ?? ''),
+  );
 
-  const toggleLookingFor = (value: LookingFor) => {
-    setLookingFor((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  };
+  const validation = useMemo(
+    () =>
+      getProfileValidation({
+        name,
+        age,
+        deviceLocation,
+        heightFeet,
+        heightInches,
+        lookingFor,
+        photos,
+      }),
+    [name, age, deviceLocation, heightFeet, heightInches, lookingFor, photos],
+  );
 
-  const toggleQueerPref = (value: QueerPreference) => {
-    setQueerPreferences((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  };
+  const showErrors = submitAttempted;
+  const fieldErrors = showErrors ? validation.errors : {};
+  const bannerMessages = showErrors ? validation.banner : [];
 
-  const togglePersonalityTag = (tag: string) => {
-    setPersonalityTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
-    );
+  const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
+    setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
   const handleContinue = () => {
-    updateProfile({
+    setSubmitAttempted(true);
+
+    const result = getProfileValidation({
       name,
-      age: parseInt(age, 10) || 0,
-      location,
+      age,
+      deviceLocation,
+      heightFeet,
       heightInches,
+      lookingFor,
       photos,
+    });
+
+    if (result.banner.length > 0) return;
+
+    const ageNum = parseInt(age, 10);
+    const parsedHeight = parseFeetInchesFields(heightFeet, heightInches)!;
+
+    updateProfile({
+      name: name.trim(),
+      age: ageNum,
+      location: deviceLocation!.label,
+      locationLatitude: deviceLocation!.latitude,
+      locationLongitude: deviceLocation!.longitude,
+      heightInches: parsedHeight,
+      photos: photos.filter(Boolean),
       genderIdentity,
       sexualOrientation,
       lookingFor,
-      queerPreferences,
+      queerRoles: [],
+      presentationTags,
       personalityTags,
+      lifestyleTags,
     });
     navigation.navigate('Preferences');
   };
 
-  const heightLabel = HEIGHT_OPTIONS.find((h) => h.value === heightInches)?.label ?? '';
+  const liveHeightError =
+    heightFeet.trim() || heightInches.trim() || showErrors
+      ? validateFeetInchesFields(heightFeet, heightInches)
+      : null;
 
   return (
     <ScreenContainer scroll contentStyle={styles.content}>
-      <ProgressBar currentStep={1} totalSteps={3} label="Profile" />
+      <BrandLogo size="auth" style={styles.logo} />
+      <OnboardingStep
+        flowLabel="Required before you join"
+        currentStep={1}
+        totalSteps={3}
+        title="Build your profile"
+        subtitle="Complete this before entering any date window. Presentation, intentions, and who you're into — so you're never dumped in the wrong pool."
+      />
 
-      <Text style={styles.title}>Tell us about you</Text>
-      <Text style={styles.subtitle}>
-        Build a profile that reflects who you are — no performative bios required.
-      </Text>
+      <SectionHeader
+        title="Photos"
+        hint={
+          showErrors
+            ? undefined
+            : `Add at least ${REQUIRED_PHOTOS} photos — tap any slot to upload or take a picture`
+        }
+        error={fieldErrors.photos}
+      />
+      <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
 
-      <Text style={styles.sectionLabel}>Photos</Text>
-      <PhotoPickerPlaceholder photos={photos} onAddPhoto={() => {}} />
-
-      <Input label="Name" placeholder="What should we call you?" value={name} onChangeText={setName} />
+      <SectionHeader title="Basics" />
+      <Input
+        label="Name"
+        placeholder="What should we call you?"
+        value={name}
+        onChangeText={setName}
+        hint={fieldErrors.name ? undefined : 'Pre-filled from your account — change your display name anytime'}
+        error={fieldErrors.name}
+      />
       <Input
         label="Age"
         placeholder="25"
         value={age}
         onChangeText={setAge}
         keyboardType="number-pad"
+        hint={fieldErrors.age ? undefined : 'From your account — must be 18+'}
+        error={fieldErrors.age}
       />
-      <Input
-        label="Location"
-        placeholder="City, State"
-        value={location}
-        onChangeText={setLocation}
+      <LocationSetting
+        value={deviceLocation}
+        onChange={setDeviceLocation}
+        error={fieldErrors.location}
       />
 
-      <Text style={styles.sectionLabel}>Height: {heightLabel}</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.heightScroll}>
-        {HEIGHT_OPTIONS.map((h) => (
-          <Pressable
-            key={h.value}
-            style={[styles.heightChip, heightInches === h.value && styles.heightChipActive]}
-            onPress={() => setHeightInches(h.value)}
-          >
-            <Text
-              style={[
-                styles.heightChipText,
-                heightInches === h.value && styles.heightChipTextActive,
-              ]}
-            >
-              {h.label}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
+      <HeightFields
+        label="Height"
+        feet={heightFeet}
+        inches={heightInches}
+        onFeetChange={setHeightFeet}
+        onInchesChange={setHeightInches}
+        error={showErrors ? fieldErrors.height : liveHeightError ?? undefined}
+      />
 
-      <Text style={styles.sectionLabel}>Gender identity</Text>
+      <SectionHeader title="Gender identity" />
       <TagSelector
         options={GENDER_OPTIONS}
         selected={[genderIdentity]}
@@ -140,7 +269,7 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
         multiSelect={false}
       />
 
-      <Text style={styles.sectionLabel}>Sexual orientation</Text>
+      <SectionHeader title="Sexual orientation" />
       <TagSelector
         options={ORIENTATION_OPTIONS}
         selected={[sexualOrientation]}
@@ -148,45 +277,53 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
         multiSelect={false}
       />
 
-      <Text style={styles.sectionLabel}>Looking for</Text>
+      <SectionHeader
+        title="Looking for"
+        hint={
+          showErrors
+            ? undefined
+            : 'Select all that apply — relationship-minded, platonic, and casual are all valid'
+        }
+        error={fieldErrors.lookingFor}
+      />
       <TagSelector
         options={LOOKING_FOR_OPTIONS}
         selected={lookingFor}
-        onToggle={toggleLookingFor}
+        onToggle={(v) => toggle(lookingFor, v, setLookingFor)}
       />
 
-      <Text style={styles.sectionLabel}>Queer dating preferences</Text>
-      <Text style={styles.hint}>Optional — helps us find compatible matches</Text>
+      <SectionHeader
+        title="Presentation"
+        hint="Masc, fem, or no label — however you show up"
+      />
       <TagSelector
-        options={QUEER_PREFERENCE_OPTIONS}
-        selected={queerPreferences}
-        onToggle={toggleQueerPref}
+        options={PRESENTATION_OPTIONS}
+        selected={presentationTags}
+        onToggle={(v) => toggle(presentationTags, v, setPresentationTags)}
       />
 
-      <Text style={styles.sectionLabel}>Personality & vibe</Text>
-      <View style={styles.personalityTags}>
-        {PERSONALITY_TAGS.map((tag) => {
-          const selected = personalityTags.includes(tag);
-          return (
-            <Pressable
-              key={tag}
-              style={[styles.personalityChip, selected && styles.personalityChipActive]}
-              onPress={() => togglePersonalityTag(tag)}
-            >
-              <Text
-                style={[
-                  styles.personalityChipText,
-                  selected && styles.personalityChipTextActive,
-                ]}
-              >
-                {tag}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <SectionHeader title="Vibe & personality" hint="Pick up to 6 tags that feel like you" />
+      <ChipGrid
+        options={PERSONALITY_TAGS}
+        selected={personalityTags}
+        onToggle={(tag) => toggle(personalityTags, tag, setPersonalityTags)}
+        maxSelect={6}
+      />
 
-      <Button title="Continue to preferences" onPress={handleContinue} size="lg" style={styles.btn} />
+      <SectionHeader
+        title="Lifestyle & values"
+        hint="Honest tags about you — matches use these for dealbreakers and nice-to-haves"
+      />
+      <ChipGrid
+        options={LIFESTYLE_TAG_OPTIONS}
+        selected={lifestyleTags}
+        onToggle={(tag) => toggle(lifestyleTags, tag, setLifestyleTags)}
+        maxSelect={6}
+      />
+
+      <FormErrorBanner messages={bannerMessages} />
+      <Button title="Continue to match preferences" onPress={handleContinue} size="lg" style={styles.btn} />
+      <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />
     </ScreenContainer>
   );
 }
@@ -194,80 +331,13 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
 const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
   },
-  title: {
-    ...typography.title,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
+  logo: {
     marginBottom: spacing.lg,
-  },
-  sectionLabel: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  hint: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginBottom: spacing.sm,
-  },
-  heightScroll: {
-    marginBottom: spacing.md,
-  },
-  heightChip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginRight: spacing.sm,
-    backgroundColor: colors.surface,
-  },
-  heightChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceAlt,
-  },
-  heightChipText: {
-    ...typography.bodySmall,
-    color: colors.text,
-  },
-  heightChipTextActive: {
-    color: colors.primaryDark,
-    fontWeight: '600',
-  },
-  personalityTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
-  },
-  personalityChip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  personalityChipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceAlt,
-  },
-  personalityChipText: {
-    ...typography.bodySmall,
-    color: colors.text,
-  },
-  personalityChipTextActive: {
-    color: colors.primaryDark,
-    fontWeight: '600',
   },
   btn: {
     marginTop: spacing.md,
+    marginBottom: spacing.sm,
   },
 });

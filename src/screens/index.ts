@@ -1,10 +1,16 @@
 export { WelcomeScreen } from './WelcomeScreen';
 export { AuthScreen } from './AuthScreen';
+export { ContactVerificationScreen } from './ContactVerificationScreen';
 export { ProfileCreationScreen } from './ProfileCreationScreen';
 export { PreferencesScreen } from './PreferencesScreen';
 export { VerificationScreen } from './VerificationScreen';
 export { SpeedDateLobbyScreen } from './SpeedDateLobbyScreen';
+export { DateQueueScreen } from './DateQueueScreen';
 export { ActiveDateScreen } from './ActiveDateScreen';
 export { PostDateFeedbackScreen } from './PostDateFeedbackScreen';
 export { MatchResultScreen } from './MatchResultScreen';
 export { MessagesScreen } from './MessagesScreen';
+export { SettingsScreen } from './SettingsScreen';
+export { ManageProfileScreen } from './ManageProfileScreen';
+export { BlockedUsersScreen } from './BlockedUsersScreen';
+export { LegalDocumentScreen } from './LegalDocumentScreen';

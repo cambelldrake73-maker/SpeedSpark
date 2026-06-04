@@ -1,18 +1,43 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import type {
+  AccountSignup,
+  BlockedUser,
   DateFeedback,
   DatingPreferences,
   OnboardingData,
   UserProfile,
 } from '../types';
 import { MOCK_CURRENT_USER, MOCK_PARTNER } from '../data/mockUsers';
+import {
+  blockUserInSupabase,
+  fetchBlockedUsers,
+  fetchPreferences,
+  fetchProfile,
+  isSupabaseConfigured,
+  requireSupabase,
+  unblockUserInSupabase,
+  upsertPreferences,
+  upsertProfile,
+} from '../services';
+import {
+  logSupabaseError,
+  logSupabaseRequest,
+  throwSupabaseError,
+} from '../utils/supabaseDebug';
 
 interface AppContextValue {
   currentUser: UserProfile;
+  preferences: Partial<DatingPreferences>;
   onboarding: OnboardingData;
   updateProfile: (updates: Partial<UserProfile>) => void;
+  updateCurrentUser: (updates: Partial<UserProfile>) => void;
   updatePreferences: (updates: Partial<DatingPreferences>) => void;
-  completeOnboarding: () => void;
+  updateAccount: (updates: Partial<AccountSignup>) => void;
+  markContactVerified: () => void;
+  windowIdentityVerified: boolean;
+  verifyForWindow: () => void;
+  resetWindowVerification: () => void;
+  completeOnboarding: () => Promise<void>;
   isOnboarded: boolean;
   currentDatePartner: UserProfile | null;
   setCurrentDatePartner: (partner: UserProfile | null) => void;
@@ -21,25 +46,39 @@ interface AppContextValue {
   partnerFeedback: DateFeedback | null;
   setPartnerFeedback: (feedback: DateFeedback | null) => void;
   isLoggedIn: boolean;
+  markLoggedIn: () => void;
   login: () => void;
   logout: () => void;
+  deleteAccount: () => void;
+  syncFromSupabase: (userId: string) => Promise<boolean>;
+  textNotificationsEnabled: boolean;
+  setTextNotificationsEnabled: (enabled: boolean) => void;
+  blockedUsers: BlockedUser[];
+  blockUser: (user: Pick<UserProfile, 'id' | 'name'>) => void;
+  unblockUser: (userId: string) => void;
+  isBlocked: (userId: string) => boolean;
 }
 
 const defaultPreferences: Partial<DatingPreferences> = {
   ageRangeMin: 21,
   ageRangeMax: 40,
   heightMinInches: 60,
-  heightMaxInches: 78,
+  heightMaxInches: 84,
   maxDistanceMiles: 25,
   preferredOrientations: [],
   preferredLookingFor: [],
-  preferredQueerPreferences: [],
+  preferredQueerRoles: [],
+  preferredPresentationTags: [],
+  dealbreakers: [],
+  niceToHaves: [],
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<UserProfile>(MOCK_CURRENT_USER);
+  const [preferences, setPreferences] =
+    useState<Partial<DatingPreferences>>(defaultPreferences);
   const [onboarding, setOnboarding] = useState<OnboardingData>({
     profile: { ...MOCK_CURRENT_USER },
     preferences: { ...defaultPreferences },
@@ -49,6 +88,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentDatePartner, setCurrentDatePartner] = useState<UserProfile | null>(null);
   const [lastFeedback, setLastFeedback] = useState<DateFeedback | null>(null);
   const [partnerFeedback, setPartnerFeedback] = useState<DateFeedback | null>(null);
+  const [windowIdentityVerified, setWindowIdentityVerified] = useState(false);
+  const [textNotificationsEnabled, setTextNotificationsEnabled] = useState(true);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+
+  const verifyForWindow = useCallback(() => {
+    setWindowIdentityVerified(true);
+    setCurrentUser((prev) => ({ ...prev, verificationStatus: 'verified' }));
+  }, []);
+
+  const resetWindowVerification = useCallback(() => {
+    setWindowIdentityVerified(false);
+  }, []);
 
   const updateProfile = useCallback((updates: Partial<UserProfile>) => {
     setOnboarding((prev) => ({
@@ -57,39 +108,152 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  const updatePreferences = useCallback((updates: Partial<DatingPreferences>) => {
+  const updateCurrentUser = useCallback((updates: Partial<UserProfile>) => {
+    setCurrentUser((prev) => ({ ...prev, ...updates }));
     setOnboarding((prev) => ({
       ...prev,
-      preferences: { ...prev.preferences, ...updates },
+      profile: { ...prev.profile, ...updates },
     }));
   }, []);
 
-  const completeOnboarding = useCallback(() => {
-    const profile = onboarding.profile as UserProfile;
-    setCurrentUser({
-      ...profile,
-      id: 'user-1',
-      verificationStatus: 'pending',
+  const updatePreferences = useCallback((updates: Partial<DatingPreferences>) => {
+    setOnboarding((prev) => {
+      const nextPrefs = { ...prev.preferences, ...updates };
+      setPreferences(nextPrefs);
+      return { ...prev, preferences: nextPrefs };
     });
+  }, []);
+
+  const updateAccount = useCallback((updates: Partial<AccountSignup>) => {
+    setOnboarding((prev) => {
+      const base: AccountSignup = prev.account ?? {
+        firstName: '',
+        lastName: '',
+        age: 0,
+        email: '',
+        phone: '',
+        verificationMethod: 'phone',
+        contactVerified: false,
+      };
+      return {
+        ...prev,
+        account: { ...base, ...updates },
+      };
+    });
+  }, []);
+
+  const markContactVerified = useCallback(() => {
+    setOnboarding((prev) => ({
+      ...prev,
+      account: prev.account ? { ...prev.account, contactVerified: true } : prev.account,
+    }));
+  }, []);
+
+  const completeOnboarding = useCallback(async () => {
+    const profile = onboarding.profile as UserProfile;
+    const nextPreferences = onboarding.preferences;
+
+    if (isSupabaseConfigured && profile.id && profile.id !== 'user-1') {
+      const savedProfile = await upsertProfile(profile.id, profile);
+      await upsertPreferences(profile.id, nextPreferences);
+      setCurrentUser(savedProfile);
+      setPreferences(nextPreferences);
+    } else {
+      setCurrentUser({
+        ...profile,
+        id: profile.id || 'user-1',
+        verificationStatus: profile.verificationStatus ?? 'pending',
+      });
+      setPreferences(nextPreferences);
+    }
+
     setIsOnboarded(true);
+    setIsLoggedIn(true);
+    setWindowIdentityVerified(false);
   }, [onboarding]);
 
+  const markLoggedIn = useCallback(() => {
+    setIsLoggedIn(true);
+  }, []);
+
+  const syncFromSupabase = useCallback(async (userId: string) => {
+    const op = 'app.syncFromSupabase';
+    logSupabaseRequest(op, { userId });
+
+    try {
+      const profile = await fetchProfile(userId);
+      if (profile) {
+        setCurrentUser(profile);
+        setOnboarding((prev) => ({ ...prev, profile }));
+      }
+
+      const prefs = await fetchPreferences(userId);
+      if (prefs) {
+        setPreferences(prefs);
+        setOnboarding((prev) => ({ ...prev, preferences: prefs }));
+      }
+
+      const blocked = await fetchBlockedUsers(userId);
+      setBlockedUsers(blocked);
+
+      const statusOp = 'profiles.selectOnboardedStatus';
+      logSupabaseRequest(statusOp, { userId });
+      const { data: profileRow, error: statusError } = await requireSupabase()
+        .from('profiles')
+        .select('onboarded_at, text_notifications_enabled')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (statusError) {
+        throwSupabaseError(statusOp, statusError);
+      }
+
+      const onboarded = Boolean(
+        (profileRow as { onboarded_at?: string | null } | null)?.onboarded_at,
+      );
+      setIsOnboarded(onboarded);
+      setIsLoggedIn(true);
+      setTextNotificationsEnabled(
+        (profileRow as { text_notifications_enabled?: boolean } | null)
+          ?.text_notifications_enabled ?? true,
+      );
+
+      console.log('[SpeedSpark Supabase] ✓ app.syncFromSupabase', { userId, onboarded });
+      return onboarded;
+    } catch (error) {
+      logSupabaseError(op, error);
+      throw error;
+    }
+  }, []);
+
+  // Demo fast-path login when not using Supabase email auth
   const login = useCallback(() => {
     setIsLoggedIn(true);
     setIsOnboarded(true);
+    setWindowIdentityVerified(false);
     setCurrentUser({
       ...MOCK_CURRENT_USER,
       id: 'user-1',
-      name: 'You',
+      name: 'Riley',
       age: 27,
       location: 'Brooklyn, NY',
+      locationLatitude: 40.6782,
+      locationLongitude: -73.9442,
       heightInches: 66,
       genderIdentity: 'non_binary',
       sexualOrientation: 'queer',
       lookingFor: ['dates', 'relationship'],
-      queerPreferences: ['verse'],
-      personalityTags: ['Creative', 'Chill'],
+      queerRoles: ['verse'],
+      presentationTags: ['no_label'],
+      personalityTags: ['Creative', 'Chill', 'Romantic'],
+      lifestyleTags: ['Non-smoker', 'Monogamous', 'Out and proud'],
       verificationStatus: 'verified',
+    });
+    setPreferences({
+      ...defaultPreferences,
+      preferredLookingFor: ['dates', 'relationship'],
+      preferredQueerRoles: ['verse', 'side'],
+      niceToHaves: ['Verified profile', 'Romantic', 'Monogamous'],
     });
   }, []);
 
@@ -97,18 +261,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setIsLoggedIn(false);
     setIsOnboarded(false);
     setCurrentUser(MOCK_CURRENT_USER);
+    setPreferences(defaultPreferences);
+    setOnboarding({ profile: { ...MOCK_CURRENT_USER }, preferences: { ...defaultPreferences } });
     setCurrentDatePartner(null);
     setLastFeedback(null);
     setPartnerFeedback(null);
+    setWindowIdentityVerified(false);
+    setTextNotificationsEnabled(true);
+    setBlockedUsers([]);
   }, []);
+
+  const deleteAccount = useCallback(() => {
+    logout();
+  }, [logout]);
+
+  const blockUser = useCallback((user: Pick<UserProfile, 'id' | 'name'>) => {
+    setBlockedUsers((prev) => {
+      if (prev.some((entry) => entry.userId === user.id)) {
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          userId: user.id,
+          name: user.name,
+          blockedAt: new Date().toISOString(),
+        },
+      ];
+    });
+
+    if (isSupabaseConfigured && currentUser.id && currentUser.id !== 'user-1') {
+      void blockUserInSupabase(currentUser.id, user.id);
+    }
+  }, [currentUser.id]);
+
+  const unblockUser = useCallback((userId: string) => {
+    setBlockedUsers((prev) => prev.filter((entry) => entry.userId !== userId));
+
+    if (isSupabaseConfigured && currentUser.id && currentUser.id !== 'user-1') {
+      void unblockUserInSupabase(currentUser.id, userId);
+    }
+  }, [currentUser.id]);
+
+  const isBlocked = useCallback(
+    (userId: string) => blockedUsers.some((entry) => entry.userId === userId),
+    [blockedUsers],
+  );
 
   return (
     <AppContext.Provider
       value={{
         currentUser,
+        preferences,
         onboarding,
         updateProfile,
+        updateCurrentUser,
         updatePreferences,
+        updateAccount,
+        markContactVerified,
+        windowIdentityVerified,
+        verifyForWindow,
+        resetWindowVerification,
         completeOnboarding,
         isOnboarded,
         currentDatePartner,
@@ -118,8 +331,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         partnerFeedback,
         setPartnerFeedback,
         isLoggedIn,
+        markLoggedIn,
         login,
         logout,
+        deleteAccount,
+        syncFromSupabase,
+        textNotificationsEnabled,
+        setTextNotificationsEnabled,
+        blockedUsers,
+        blockUser,
+        unblockUser,
+        isBlocked,
       }}
     >
       {children}
@@ -140,10 +362,8 @@ export function simulatePartnerFeedback(dateId: string, partnerId: string): Date
   return {
     dateId,
     partnerId,
-    feltSafe: true,
-    goodConversation: true,
+    attractivenessRating: 8,
     wouldTalkAgain: true,
-    vibeRating: 4,
   };
 }
 

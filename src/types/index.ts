@@ -28,33 +28,56 @@ export type LookingFor =
   | 'casual'
   | 'unsure';
 
-export type QueerPreference =
+export type QueerRole =
   | 'top'
   | 'bottom'
   | 'verse'
   | 'side'
+  | 'no_label'
+  | 'prefer_not_to_say';
+
+export type PresentationTag =
   | 'masc'
   | 'fem'
   | 'no_label'
   | 'prefer_not_to_say';
 
+/** @deprecated Use queerRoles + presentationTags */
+export type QueerPreference = QueerRole | PresentationTag;
+
 export type VerificationStatus = 'unverified' | 'pending' | 'verified';
+
+export type ContactVerificationMethod = 'phone' | 'email';
+
+export interface AccountSignup {
+  firstName: string;
+  lastName: string;
+  age: number;
+  email: string;
+  phone: string;
+  verificationMethod: ContactVerificationMethod;
+  contactVerified: boolean;
+}
 
 export interface UserProfile {
   id: string;
   name: string;
   age: number;
   location: string;
+  locationLatitude?: number;
+  locationLongitude?: number;
   heightInches: number;
   photos: string[];
   genderIdentity: GenderIdentity;
   sexualOrientation: SexualOrientation;
   lookingFor: LookingFor[];
-  queerPreferences: QueerPreference[];
+  queerRoles: QueerRole[];
+  presentationTags: PresentationTag[];
   personalityTags: string[];
+  lifestyleTags: string[];
   verificationStatus: VerificationStatus;
-  /** Private matching signal — never shown publicly */
-  attractivenessRating?: number;
+  /** Private internal match-fit signal — never shown to users */
+  internalMatchFit?: number;
 }
 
 export interface DatingPreferences {
@@ -65,16 +88,21 @@ export interface DatingPreferences {
   maxDistanceMiles: number;
   preferredOrientations: SexualOrientation[];
   preferredLookingFor: LookingFor[];
-  preferredQueerPreferences: QueerPreference[];
+  preferredQueerRoles: QueerRole[];
+  preferredPresentationTags: PresentationTag[];
+  dealbreakers: string[];
+  niceToHaves: string[];
 }
 
 export interface SpeedDateWindow {
   id: string;
   label: string;
+  description: string;
   startTime: string;
   endTime: string;
   timezone: string;
   isLive: boolean;
+  queueCount?: number;
 }
 
 export interface SpeedDateMatch {
@@ -83,14 +111,13 @@ export interface SpeedDateMatch {
   scheduledAt: string;
 }
 
+/** Private post-date feedback — never shown publicly */
 export interface DateFeedback {
   dateId: string;
   partnerId: string;
-  feltSafe: boolean;
-  goodConversation: boolean;
+  attractivenessRating: number;
+  /** Whether the user chose to match — independent of attractiveness rating */
   wouldTalkAgain: boolean;
-  vibeRating: number;
-  notes?: string;
 }
 
 export interface Match {
@@ -109,7 +136,14 @@ export interface Message {
   sentAt: string;
 }
 
+export interface BlockedUser {
+  userId: string;
+  name: string;
+  blockedAt: string;
+}
+
 export interface OnboardingData {
   profile: Partial<UserProfile>;
   preferences: Partial<DatingPreferences>;
+  account?: AccountSignup;
 }

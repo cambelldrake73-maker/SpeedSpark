@@ -1,22 +1,38 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, ProgressBar, ScreenContainer } from '../components';
+import { Button, OnboardingStep, ScreenContainer } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import type { VerificationScreenProps } from '../navigation/types';
 
-export function VerificationScreen({ navigation }: VerificationScreenProps) {
-  const { completeOnboarding } = useApp();
+export function VerificationScreen({ navigation, route }: VerificationScreenProps) {
+  const { completeOnboarding, verifyForWindow } = useApp();
+  const isWindowCheck = route.params?.context === 'window';
 
-  const handleContinue = () => {
-    completeOnboarding();
+  const handleContinue = async () => {
+    if (isWindowCheck) {
+      verifyForWindow();
+      navigation.goBack();
+      return;
+    }
+    await completeOnboarding();
     navigation.replace('SpeedDateLobby');
   };
 
   return (
-    <ScreenContainer contentStyle={styles.content}>
-      <ProgressBar currentStep={3} totalSteps={3} label="Verification" />
+    <ScreenContainer scroll contentStyle={styles.content}>
+      <OnboardingStep
+        flowLabel={isWindowCheck ? 'Before you join' : 'Step 3 of 3'}
+        currentStep={isWindowCheck ? 1 : 3}
+        totalSteps={isWindowCheck ? 1 : 3}
+        title={isWindowCheck ? 'Safety check' : 'Verify your identity'}
+        subtitle={
+          isWindowCheck
+            ? 'Before each live window, we confirm you match your profile photos. It is mainly about safety — so everyone on a video date is who they say they are.'
+            : 'Verified profiles help keep the community safe. Real verification ships soon — for now, you can explore the full demo flow.'
+        }
+      />
 
       <View style={styles.iconContainer}>
         <View style={styles.iconCircle}>
@@ -24,40 +40,58 @@ export function VerificationScreen({ navigation }: VerificationScreenProps) {
         </View>
       </View>
 
-      <Text style={styles.title}>Verify your identity</Text>
-      <Text style={styles.subtitle}>
-        A verified community keeps everyone safer. Real identity verification
-        will be added in a future update.
-      </Text>
-
       <View style={styles.placeholder}>
         <Ionicons name="camera-outline" size={32} color={colors.textMuted} />
-        <Text style={styles.placeholderTitle}>Verification coming soon</Text>
+        <Text style={styles.placeholderTitle}>
+          {isWindowCheck ? 'Live selfie safety check' : 'Verification coming soon'}
+        </Text>
         <Text style={styles.placeholderText}>
-          You'll take a quick selfie matched to your profile photos. For this MVP,
-          you can continue with a placeholder verified status.
+          {isWindowCheck
+            ? 'Take a quick live selfie matched to your profile photos. Until the real check ships, continue with a demo pass for this window.'
+            : "You'll take a quick live selfie matched to your profile photos. Until then, continue with a placeholder verified badge for demo purposes."}
         </Text>
       </View>
 
       <View style={styles.steps}>
-        <StepItem number={1} text="Take a live selfie" />
-        <StepItem number={2} text="We match it to your profile photos" />
-        <StepItem number={3} text="Get a verified badge on your profile" />
+        <StepItem number={1} text="Take a live selfie in good lighting" />
+        <StepItem number={2} text="We confirm it matches your profile photos" />
+        <StepItem
+          number={3}
+          text={
+            isWindowCheck
+              ? 'Join the queue — you are cleared for this window'
+              : 'Earn a verified badge others can trust for safety'
+          }
+        />
       </View>
 
-      <View style={styles.actions}>
-        <Button
-          title="Skip for now (MVP)"
-          onPress={handleContinue}
-          size="lg"
-        />
+      <View style={styles.trustBox}>
+        <Text style={styles.trustText}>
+          {isWindowCheck
+            ? 'Your selfie is only used for safety — to confirm you are the person in your photos before a live video date.'
+            : "SpeedSpark never sells your verification data. It's only used to keep the community safe."}
+        </Text>
+      </View>
+
+      <Button
+        title={isWindowCheck ? 'Complete check & return to lobby' : 'Enter the lobby (demo)'}
+        onPress={handleContinue}
+        size="lg"
+      />
+      {!isWindowCheck && (
         <Button
           title="Start verification (placeholder)"
           onPress={handleContinue}
           variant="outline"
           disabled
+          style={styles.secondaryBtn}
         />
-      </View>
+      )}
+      <Button
+        title="Back"
+        onPress={() => navigation.goBack()}
+        variant="ghost"
+      />
     </ScreenContainer>
   );
 }
@@ -76,7 +110,7 @@ function StepItem({ number, text }: { number: number; text: string }) {
 const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.md,
-    flex: 1,
+    paddingBottom: spacing.xl,
   },
   iconContainer: {
     alignItems: 'center',
@@ -89,18 +123,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  title: {
-    ...typography.title,
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.lg,
   },
   placeholder: {
     backgroundColor: colors.surface,
@@ -126,7 +148,7 @@ const styles = StyleSheet.create({
   },
   steps: {
     gap: spacing.md,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
   stepItem: {
     flexDirection: 'row',
@@ -142,7 +164,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   stepNumberText: {
-    color: colors.surface,
+    color: colors.text,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -151,9 +173,20 @@ const styles = StyleSheet.create({
     color: colors.text,
     flex: 1,
   },
-  actions: {
-    marginTop: 'auto',
-    gap: spacing.sm,
-    paddingBottom: spacing.md,
+  trustBox: {
+    backgroundColor: colors.surfaceAlt,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.lg,
+  },
+  trustText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    lineHeight: 18,
+    textAlign: 'center',
+  },
+  secondaryBtn: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
   },
 });

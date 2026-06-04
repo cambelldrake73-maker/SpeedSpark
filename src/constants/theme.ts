@@ -1,21 +1,39 @@
+import { cardShadow } from '../utils/platformStyles';
+
+/** SpeedSpark brand palette — red / orange / gold on dark (matches logo) */
 export const colors = {
-  primary: '#7C3AED',
-  primaryLight: '#A78BFA',
-  primaryDark: '#5B21B6',
-  secondary: '#EC4899',
-  secondaryLight: '#F9A8D4',
-  background: '#FAF7FF',
-  surface: '#FFFFFF',
-  surfaceAlt: '#F3EEFF',
-  text: '#1F1B2E',
-  textSecondary: '#6B6280',
-  textMuted: '#9B93AB',
-  border: '#E8E0F0',
-  success: '#10B981',
-  successLight: '#D1FAE5',
-  warning: '#F59E0B',
+  /** Core brand */
+  sparkRed: '#E61E25',
+  sparkOrange: '#F58220',
+  sparkGold: '#FFD200',
+  /** UI tokens */
+  primary: '#E61E25',
+  primaryLight: '#F58220',
+  primaryDark: '#B9151C',
+  accent: '#F58220',
+  accentLight: 'rgba(245, 130, 32, 0.15)',
+  background: '#0F0F0F',
+  surface: '#202020',
+  surfaceAlt: '#292929',
+  text: '#FFFFFF',
+  textSecondary: '#A3A3A3',
+  textMuted: '#737373',
+  border: '#393939',
+  success: '#22C55E',
+  successLight: 'rgba(34, 197, 94, 0.15)',
+  warning: '#F58220',
   error: '#EF4444',
-  overlay: 'rgba(31, 27, 46, 0.6)',
+  overlay: 'rgba(0, 0, 0, 0.72)',
+  /** @deprecated */
+  secondary: '#F58220',
+  secondaryLight: 'rgba(245, 130, 32, 0.15)',
+};
+
+export const brand = {
+  name: 'SpeedSpark',
+  displayName: 'SpeedSpark',
+  tagline: 'Queer speed dating, thoughtfully designed',
+  logo: require('../../assets/speedspark-logo.png'),
 };
 
 export const spacing = {
@@ -25,6 +43,11 @@ export const spacing = {
   lg: 24,
   xl: 32,
   xxl: 48,
+};
+
+/** Layout — cap width on large web viewports so content stays readable */
+export const layout = {
+  maxContentWidth: 960,
 };
 
 export const borderRadius = {
@@ -40,11 +63,13 @@ export const typography = {
     fontSize: 32,
     fontWeight: '700' as const,
     lineHeight: 40,
+    letterSpacing: -0.5,
   },
   title: {
     fontSize: 24,
     fontWeight: '700' as const,
     lineHeight: 32,
+    letterSpacing: -0.3,
   },
   subtitle: {
     fontSize: 18,
@@ -68,19 +93,8 @@ export const typography = {
   },
 };
 
+/** @deprecated Use cardShadow() from utils/platformStyles */
 export const shadows = {
-  sm: {
-    shadowColor: '#7C3AED',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  md: {
-    shadowColor: '#7C3AED',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 4,
-  },
+  sm: cardShadow('sm'),
+  md: cardShadow('md'),
 };

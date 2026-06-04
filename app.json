@@ -1,17 +1,40 @@
 {
   "expo": {
-    "name": "Spark",
-    "slug": "spark-queer-dating",
+    "name": "Speed Spark",
+    "slug": "speed-spark",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "SpeedSpark needs photo access so you can upload profile pictures.",
+          "cameraPermission": "SpeedSpark needs camera access so you can take profile photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "SpeedSpark uses your location to set your city for nearby matching — never your exact address."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "SpeedSpark needs camera access for live video dates.",
+          "microphonePermission": "SpeedSpark needs microphone access so your date can hear you.",
+          "recordAudioAndroid": true
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#FAF7FF",
+        "backgroundColor": "#0F0F0F",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -19,7 +42,8 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "backgroundColor": "#0F0F0F"
     }
   }
 }

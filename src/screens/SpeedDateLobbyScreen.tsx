@@ -1,135 +1,225 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, ScreenContainer } from '../components';
-import { borderRadius, colors, shadows, spacing, typography } from '../constants/theme';
+import {
+  Button,
+  LobbyHeader,
+  QueueStatusPanel,
+  ScreenContainer,
+  StatStrip,
+  type QueueStatus,
+} from '../components';
+import { COPY } from '../constants/options';
+import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { MOCK_SPEED_DATE_WINDOWS } from '../data/mockSpeedDates';
-import { MOCK_PARTNER, MOCK_QUEUE_USERS } from '../data/mockUsers';
+import { MOCK_MATCHES } from '../data/mockMessages';
+import { MOCK_PARTNER } from '../data/mockUsers';
 import { useApp } from '../context/AppContext';
+import type { SpeedDateWindow } from '../types';
 import type { SpeedDateLobbyScreenProps } from '../navigation/types';
 
-type QueueStatus = 'idle' | 'searching' | 'matched';
-
 export function SpeedDateLobbyScreen({ navigation }: SpeedDateLobbyScreenProps) {
-  const { currentUser, setCurrentDatePartner } = useApp();
+  const {
+    currentUser,
+    windowIdentityVerified,
+    isOnboarded,
+    setCurrentDatePartner,
+  } = useApp();
   const [queueStatus, setQueueStatus] = useState<QueueStatus>('idle');
-  const [countdown, setCountdown] = useState(0);
+  const [searchSeconds, setSearchSeconds] = useState(0);
+  const [reminderWindowIds, setReminderWindowIds] = useState<Set<string>>(new Set());
 
   const liveWindow = MOCK_SPEED_DATE_WINDOWS.find((w) => w.isLive);
   const upcomingWindows = MOCK_SPEED_DATE_WINDOWS.filter((w) => !w.isLive);
 
+  const queueLabel = queueStatus === 'idle' ? 'Open' : 'Pairing';
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!isOnboarded) {
+        navigation.replace('ProfileCreation');
+        return;
+      }
+
+      setQueueStatus('idle');
+      setSearchSeconds(0);
+    }, [isOnboarded, navigation]),
+  );
+
   useEffect(() => {
     if (queueStatus !== 'searching') return;
 
-    const timer = setInterval(() => {
-      setCountdown((prev) => prev + 1);
-    }, 1000);
-
+    const tick = setInterval(() => setSearchSeconds((s) => s + 1), 1000);
     const matchTimer = setTimeout(() => {
-      setQueueStatus('matched');
       setCurrentDatePartner(MOCK_PARTNER);
-    }, 3000);
+      setQueueStatus('idle');
+      setSearchSeconds(0);
+      navigation.navigate('ActiveDate', { partner: MOCK_PARTNER });
+    }, 2800);
 
     return () => {
-      clearInterval(timer);
+      clearInterval(tick);
       clearTimeout(matchTimer);
     };
-  }, [queueStatus, setCurrentDatePartner]);
+  }, [queueStatus, navigation, setCurrentDatePartner]);
+
+  const handleVerifyIdentity = () => {
+    navigation.navigate('Verification', { context: 'window' });
+  };
 
   const handleJoinQueue = () => {
+    if (!isOnboarded) {
+      navigation.replace('ProfileCreation');
+      return;
+    }
+    if (!windowIdentityVerified) {
+      handleVerifyIdentity();
+      return;
+    }
     setQueueStatus('searching');
-    setCountdown(0);
+    setSearchSeconds(0);
   };
 
-  const handleStartDate = () => {
-    navigation.navigate('ActiveDate', { partner: MOCK_PARTNER });
+  const handleLeaveQueue = () => {
+    setQueueStatus('idle');
+    setSearchSeconds(0);
   };
 
-  const formatWindowTime = (iso: string) => {
-    const date = new Date(iso);
-    return date.toLocaleString([], {
+  const toggleReminder = (windowId: string) => {
+    setReminderWindowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(windowId)) next.delete(windowId);
+      else next.add(windowId);
+      return next;
+    });
+  };
+
+  const formatWindowTime = (iso: string) =>
+    new Date(iso).toLocaleString([], {
       weekday: 'short',
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
     });
-  };
 
   return (
     <ScreenContainer scroll contentStyle={styles.content}>
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>Hey, {currentUser.name || 'there'} 👋</Text>
-          <Text style={styles.headerSub}>Ready for your next connection?</Text>
-        </View>
-        <Button
-          title="Messages"
-          onPress={() => navigation.navigate('Messages', {})}
-          variant="outline"
-          size="sm"
-        />
+      <LobbyHeader
+        user={currentUser}
+        onMessagesPress={() => navigation.navigate('Messages', {})}
+        onSettingsPress={() => navigation.navigate('Settings')}
+        unreadCount={MOCK_MATCHES.length}
+      />
+
+      <StatStrip
+        datesThisWeek={2}
+        matches={MOCK_MATCHES.length}
+        queueLabel={queueLabel}
+      />
+
+      <View style={styles.notice}>
+        <Ionicons name="calendar-outline" size={18} color={colors.sparkOrange} />
+        <Text style={styles.noticeText}>{COPY.scheduledWindows}</Text>
       </View>
 
       {liveWindow && (
-        <View style={[styles.liveCard, shadows.md]}>
-          <View style={styles.liveBadge}>
-            <View style={styles.liveDot} />
-            <Text style={styles.liveText}>LIVE NOW</Text>
+        <View style={styles.liveSection}>
+          <View style={styles.liveSectionHead}>
+            <View style={styles.liveBadge}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveBadgeText}>LIVE NOW</Text>
+            </View>
           </View>
+
           <Text style={styles.windowTitle}>{liveWindow.label}</Text>
+          <Text style={styles.windowDesc}>{liveWindow.description}</Text>
           <Text style={styles.windowTime}>
             {formatWindowTime(liveWindow.startTime)} – {formatWindowTime(liveWindow.endTime)}
           </Text>
-          <Text style={styles.queueCount}>
-            {MOCK_QUEUE_USERS.length} people in queue nearby
+          <Text style={styles.queueMeta}>
+            {liveWindow.queueCount ?? 0} people in queue nearby · 5 min per date
           </Text>
 
-          {queueStatus === 'idle' && (
-            <Button title="Join the queue" onPress={handleJoinQueue} size="lg" style={styles.queueBtn} />
-          )}
-
-          {queueStatus === 'searching' && (
-            <View style={styles.searching}>
-              <ActivityIndicator color={colors.primary} size="large" />
-              <Text style={styles.searchingText}>Finding your match...</Text>
-              <Text style={styles.searchingSub}>{countdown}s</Text>
-            </View>
-          )}
-
-          {queueStatus === 'matched' && (
-            <View style={styles.matched}>
-              <Ionicons name="heart" size={32} color={colors.secondary} />
-              <Text style={styles.matchedText}>You're matched with {MOCK_PARTNER.name}!</Text>
-              <Button title="Start 5-min date" onPress={handleStartDate} size="lg" style={styles.queueBtn} />
-            </View>
-          )}
+          <View style={styles.queueArea}>
+            <QueueStatusPanel
+              status={queueStatus}
+              searchSeconds={searchSeconds}
+              identityVerified={windowIdentityVerified}
+              onJoinQueue={handleJoinQueue}
+              onLeaveQueue={handleLeaveQueue}
+              onVerifyIdentity={handleVerifyIdentity}
+            />
+          </View>
         </View>
       )}
 
       <Text style={styles.sectionTitle}>Upcoming windows</Text>
+      <Text style={styles.sectionSub}>
+        Scheduled times — no endless scrolling.
+      </Text>
       {upcomingWindows.map((window) => (
-        <View key={window.id} style={styles.upcomingCard}>
-          <Text style={styles.upcomingTitle}>{window.label}</Text>
-          <Text style={styles.upcomingTime}>{formatWindowTime(window.startTime)}</Text>
-          <Button title="Set reminder" variant="ghost" size="sm" onPress={() => {}} />
-        </View>
+        <UpcomingRow
+          key={window.id}
+          window={window}
+          formatTime={formatWindowTime}
+          reminded={reminderWindowIds.has(window.id)}
+          onToggleReminder={() => toggleReminder(window.id)}
+        />
       ))}
 
       <View style={styles.tips}>
-        <Text style={styles.tipsTitle}>Speed date tips</Text>
-        <Tip text="Find a quiet spot with good lighting" />
-        <Tip text="Be yourself — 5 minutes goes fast!" />
-        <Tip text="You can end early if you feel uncomfortable" />
+        <Text style={styles.tipsTitle}>Why SpeedSpark is different</Text>
+        <Tip text="Your profile includes masc/fem vibe and who you're looking for — not just photos" />
+        <Tip text="A safety check before each window confirms people match their photos before video dates" />
+        <Tip text="Post-date you rate attractiveness privately — never shown on anyone's profile" />
       </View>
     </ScreenContainer>
+  );
+}
+
+function UpcomingRow({
+  window,
+  formatTime,
+  reminded,
+  onToggleReminder,
+}: {
+  window: SpeedDateWindow;
+  formatTime: (iso: string) => string;
+  reminded: boolean;
+  onToggleReminder: () => void;
+}) {
+  return (
+    <View style={styles.upcomingRow}>
+      <View style={styles.upcomingMain}>
+        <View style={styles.upcomingHead}>
+          <Text style={styles.upcomingTitle}>{window.label}</Text>
+          <View style={styles.notLiveBadge}>
+            <Text style={styles.notLiveBadgeText}>NOT LIVE</Text>
+          </View>
+        </View>
+        <Text style={styles.upcomingTime}>{formatTime(window.startTime)}</Text>
+        <Text style={styles.upcomingDesc}>{window.description}</Text>
+        {reminded ? (
+          <Text style={styles.reminderNote}>We'll text you before this window goes live.</Text>
+        ) : null}
+      </View>
+      <Button
+        title={reminded ? 'Reminder on' : 'Remind me'}
+        variant={reminded ? 'outline' : 'ghost'}
+        size="sm"
+        onPress={onToggleReminder}
+        style={styles.remindBtn}
+      />
+    </View>
   );
 }
 
 function Tip({ text }: { text: string }) {
   return (
     <View style={styles.tipRow}>
-      <Text style={styles.tipBullet}>•</Text>
+      <Text style={styles.tipBullet}>·</Text>
       <Text style={styles.tipText}>{text}</Text>
     </View>
   );
@@ -138,35 +228,39 @@ function Tip({ text }: { text: string }) {
 const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
   },
-  header: {
+  notice: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceAlt,
+    padding: spacing.md,
+    borderRadius: borderRadius.md,
     marginBottom: spacing.lg,
   },
-  greeting: {
-    ...typography.title,
-    color: colors.text,
-  },
-  headerSub: {
+  noticeText: {
     ...typography.bodySmall,
     color: colors.textSecondary,
-    marginTop: spacing.xs,
+    flex: 1,
+    lineHeight: 20,
   },
-  liveCard: {
+  liveSection: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.lg,
-    borderWidth: 2,
+    borderWidth: 1,
     borderColor: colors.primaryLight,
+  },
+  liveSectionHead: {
+    marginBottom: spacing.sm,
   },
   liveBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.sm,
+    alignSelf: 'flex-start',
   },
   liveDot: {
     width: 8,
@@ -174,66 +268,81 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: colors.error,
   },
-  liveText: {
+  liveBadgeText: {
     ...typography.caption,
     fontWeight: '700',
     color: colors.error,
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   windowTitle: {
     ...typography.subtitle,
     color: colors.text,
     marginBottom: spacing.xs,
   },
-  windowTime: {
+  windowDesc: {
     ...typography.bodySmall,
     color: colors.textSecondary,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
+    lineHeight: 20,
   },
-  queueCount: {
-    ...typography.caption,
-    color: colors.primary,
-    marginBottom: spacing.md,
-  },
-  queueBtn: {
-    marginTop: spacing.sm,
-  },
-  searching: {
-    alignItems: 'center',
-    paddingVertical: spacing.lg,
-    gap: spacing.sm,
-  },
-  searchingText: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '500',
-  },
-  searchingSub: {
+  windowTime: {
     ...typography.caption,
     color: colors.textMuted,
+    marginBottom: spacing.xs,
   },
-  matched: {
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
+  queueMeta: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '500',
+    marginBottom: spacing.md,
   },
-  matchedText: {
-    ...typography.body,
-    color: colors.text,
-    fontWeight: '600',
+  queueArea: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.md,
   },
   sectionTitle: {
     ...typography.subtitle,
     color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  sectionSub: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
     marginBottom: spacing.md,
   },
-  upcomingCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
+  upcomingRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  upcomingMain: {
+    flex: 1,
+  },
+  upcomingHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
+  notLiveBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
     borderWidth: 1,
     borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  notLiveBadgeText: {
+    ...typography.caption,
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 0.4,
   },
   upcomingTitle: {
     ...typography.body,
@@ -241,10 +350,25 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   upcomingTime: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  upcomingDesc: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 4,
+    lineHeight: 16,
+  },
+  reminderNote: {
+    ...typography.caption,
+    color: colors.success,
     marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+    lineHeight: 16,
+  },
+  remindBtn: {
+    flexShrink: 0,
   },
   tips: {
     backgroundColor: colors.surfaceAlt,
@@ -255,7 +379,7 @@ const styles = StyleSheet.create({
   tipsTitle: {
     ...typography.bodySmall,
     fontWeight: '600',
-    color: colors.primaryDark,
+    color: colors.text,
     marginBottom: spacing.sm,
   },
   tipRow: {
@@ -264,11 +388,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   tipBullet: {
-    color: colors.primary,
+    color: colors.textMuted,
   },
   tipText: {
     ...typography.bodySmall,
     color: colors.textSecondary,
     flex: 1,
+    lineHeight: 20,
   },
 });

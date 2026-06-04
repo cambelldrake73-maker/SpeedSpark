@@ -1,154 +1,104 @@
 import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Input, ScreenContainer } from '../components';
-import { borderRadius, colors, spacing, typography } from '../constants/theme';
+import { Button, DatingProfileCard, ScaleRating, ScreenContainer, SelectableOption } from '../components';
+import { COPY } from '../constants/options';
+import { colors, spacing, typography } from '../constants/theme';
 import { MOCK_PARTNER } from '../data/mockUsers';
 import { simulatePartnerFeedback, useApp } from '../context/AppContext';
 import type { PostDateFeedbackScreenProps } from '../navigation/types';
 
 export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackScreenProps) {
   const { partnerId, dateId } = route.params;
-  const { setLastFeedback, setPartnerFeedback } = useApp();
+  const { setLastFeedback, setPartnerFeedback, currentDatePartner } = useApp();
+  const partner = currentDatePartner ?? MOCK_PARTNER;
+  const partnerName = partner.name;
 
-  const [feltSafe, setFeltSafe] = useState<boolean | null>(null);
-  const [goodConversation, setGoodConversation] = useState<boolean | null>(null);
-  const [wouldTalkAgain, setWouldTalkAgain] = useState<boolean | null>(null);
-  const [vibeRating, setVibeRating] = useState(0);
-  const [notes, setNotes] = useState('');
+  const [attractivenessRating, setAttractivenessRating] = useState(0);
+  const [wantToMatch, setWantToMatch] = useState<boolean | null>(null);
 
-  const isComplete =
-    feltSafe !== null &&
-    goodConversation !== null &&
-    wouldTalkAgain !== null &&
-    vibeRating > 0;
+  const canSubmit = attractivenessRating > 0 && wantToMatch !== null;
 
   const handleSubmit = () => {
-    if (!isComplete) return;
+    if (!canSubmit) return;
 
     const feedback = {
       dateId,
       partnerId,
-      feltSafe: feltSafe!,
-      goodConversation: goodConversation!,
-      wouldTalkAgain: wouldTalkAgain!,
-      vibeRating,
-      notes: notes || undefined,
+      attractivenessRating,
+      wouldTalkAgain: wantToMatch === true,
     };
 
     setLastFeedback(feedback);
     setPartnerFeedback(simulatePartnerFeedback(dateId, partnerId));
-
     navigation.replace('MatchResult', { partnerId, dateId });
   };
 
   return (
     <ScreenContainer scroll contentStyle={styles.content}>
-      <Text style={styles.title}>How did it go?</Text>
+      <Text style={styles.title}>How was your date?</Text>
       <Text style={styles.subtitle}>
-        Your feedback is private and helps us improve future matches with {MOCK_PARTNER.name}.
+        Here's who you just talked to. Your rating and match choice stay private — {partnerName}{' '}
+        won't see them.
       </Text>
 
-      <YesNoQuestion
-        question="Did you feel safe during the date?"
-        value={feltSafe}
-        onChange={setFeltSafe}
-      />
-
-      <YesNoQuestion
-        question="Was it a good conversation?"
-        value={goodConversation}
-        onChange={setGoodConversation}
-      />
-
-      <YesNoQuestion
-        question="Would you like to talk to them again?"
-        value={wouldTalkAgain}
-        onChange={setWouldTalkAgain}
-        highlight
-      />
-
-      <Text style={styles.sectionLabel}>Overall vibe</Text>
-      <View style={styles.stars}>
-        {[1, 2, 3, 4, 5].map((star) => (
-          <Pressable key={star} onPress={() => setVibeRating(star)}>
-            <Ionicons
-              name={star <= vibeRating ? 'star' : 'star-outline'}
-              size={36}
-              color={star <= vibeRating ? colors.warning : colors.border}
-            />
-          </Pressable>
-        ))}
+      <View style={styles.profileReveal}>
+        <DatingProfileCard user={partner} />
       </View>
 
-      <Input
-        label="Private notes (optional)"
-        placeholder="Anything you'd like us to know for future matching..."
-        value={notes}
-        onChangeText={setNotes}
-        multiline
-        numberOfLines={3}
-        style={styles.notesInput}
-      />
+      <View style={styles.ratingCard}>
+        <ScaleRating
+          label="How would you rate this person on attractiveness?"
+          hint="1 = not attracted · 10 = very attracted"
+          value={attractivenessRating}
+          onChange={setAttractivenessRating}
+          min={1}
+          max={10}
+        />
+      </View>
+
+      <View style={styles.matchCard}>
+        <Text style={styles.matchTitle}>Would you like to match with {partnerName}?</Text>
+        <Text style={styles.matchHint}>
+          A match only happens if you both say yes. This is separate from your attractiveness
+          rating.
+        </Text>
+        <SelectableOption
+          selected={wantToMatch === true}
+          onPress={() => setWantToMatch(true)}
+          icon="heart"
+          title="Yes — I'd like to match"
+          description="You're open to messaging and seeing where it goes."
+        />
+        <SelectableOption
+          selected={wantToMatch === false}
+          onPress={() => setWantToMatch(false)}
+          icon="close-circle-outline"
+          title="No thanks"
+          description="Not interested in matching right now — totally fine."
+        />
+      </View>
 
       <View style={styles.privacyNote}>
         <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
-        <Text style={styles.privacyText}>
-          {MOCK_PARTNER.name} won't see your answers. Match results are only revealed
-          if you both want to connect again.
-        </Text>
+        <Text style={styles.privacyText}>{COPY.sparkPrivate}</Text>
       </View>
 
       <Button
-        title="Submit feedback"
+        title="Submit"
         onPress={handleSubmit}
         size="lg"
-        disabled={!isComplete}
+        disabled={!canSubmit}
         style={styles.submitBtn}
       />
     </ScreenContainer>
   );
 }
 
-function YesNoQuestion({
-  question,
-  value,
-  onChange,
-  highlight = false,
-}: {
-  question: string;
-  value: boolean | null;
-  onChange: (v: boolean) => void;
-  highlight?: boolean;
-}) {
-  return (
-    <View style={[styles.question, highlight && styles.questionHighlight]}>
-      <Text style={styles.questionText}>{question}</Text>
-      <View style={styles.yesNoRow}>
-        <Pressable
-          style={[styles.yesNoBtn, value === true && styles.yesNoBtnYes]}
-          onPress={() => onChange(true)}
-        >
-          <Text style={[styles.yesNoText, value === true && styles.yesNoTextActive]}>
-            Yes
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.yesNoBtn, value === false && styles.yesNoBtnNo]}
-          onPress={() => onChange(false)}
-        >
-          <Text style={[styles.yesNoText, value === false && styles.yesNoTextActive]}>
-            No
-          </Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.lg,
+    paddingBottom: spacing.xxl,
   },
   title: {
     ...typography.title,
@@ -159,70 +109,33 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textSecondary,
     marginBottom: spacing.lg,
+    lineHeight: 24,
   },
-  question: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  questionHighlight: {
-    borderColor: colors.primaryLight,
-    backgroundColor: colors.surfaceAlt,
-  },
-  questionText: {
-    ...typography.body,
-    fontWeight: '500',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  yesNoRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  yesNoBtn: {
-    flex: 1,
-    paddingVertical: spacing.sm,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    alignItems: 'center',
-    backgroundColor: colors.background,
-  },
-  yesNoBtnYes: {
-    borderColor: colors.success,
-    backgroundColor: colors.successLight,
-  },
-  yesNoBtnNo: {
-    borderColor: colors.textMuted,
-    backgroundColor: colors.surfaceAlt,
-  },
-  yesNoText: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.textSecondary,
-  },
-  yesNoTextActive: {
-    color: colors.text,
-  },
-  sectionLabel: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  stars: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.sm,
+  profileReveal: {
     marginBottom: spacing.lg,
   },
-  notesInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
+  ratingCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+  },
+  matchCard: {
+    marginBottom: spacing.lg,
+  },
+  matchTitle: {
+    ...typography.body,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  matchHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    lineHeight: 18,
+    marginBottom: spacing.sm,
   },
   privacyNote: {
     flexDirection: 'row',

@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -40,6 +41,7 @@ export function Button({
         styles.base,
         styles[variant],
         styles[`size_${size}`],
+        Platform.OS === 'web' ? styles.webPressable : null,
         pressed && !isDisabled && styles.pressed,
         isDisabled && styles.disabled,
         style,
@@ -64,6 +66,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: borderRadius.md,
   },
+  webPressable: {
+    cursor: 'pointer',
+  } as ViewStyle,
   primary: {
     backgroundColor: colors.primary,
   },
@@ -73,7 +78,7 @@ const styles = StyleSheet.create({
   outline: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderColor: colors.sparkOrange,
   },
   ghost: {
     backgroundColor: 'transparent',
@@ -106,10 +111,10 @@ const styles = StyleSheet.create({
     color: colors.surface,
   },
   text_outline: {
-    color: colors.primary,
+    color: colors.sparkOrange,
   },
   text_ghost: {
-    color: colors.primary,
+    color: colors.sparkOrange,
   },
   textSize_sm: {
     fontSize: 14,

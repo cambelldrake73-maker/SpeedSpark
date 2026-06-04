@@ -1,23 +1,52 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Button, ProgressBar, ScreenContainer, TagSelector } from '../components';
+import { Ionicons } from '@expo/vector-icons';
 import {
-  DISTANCE_OPTIONS,
+  Button,
+  ChipGrid,
+  DistanceSlider,
+  FormErrorBanner,
+  HeightFields,
+  OnboardingStep,
+  ScreenContainer,
+  SectionHeader,
+  TagSelector,
+} from '../components';
+import {
+  COPY,
+  DEALBREAKER_OPTIONS,
   LOOKING_FOR_OPTIONS,
+  NICE_TO_HAVE_OPTIONS,
   ORIENTATION_OPTIONS,
-  QUEER_PREFERENCE_OPTIONS,
+  PRESENTATION_OPTIONS,
 } from '../constants/options';
-import { colors, spacing, typography } from '../constants/theme';
+import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
-import type { LookingFor, QueerPreference, SexualOrientation } from '../types';
+import type { LookingFor, PresentationTag, SexualOrientation } from '../types';
 import type { PreferencesScreenProps } from '../navigation/types';
+import {
+  formatHeightInches,
+  inchesToFeetInches,
+  parseFeetInchesFields,
+  validateFeetInchesFields,
+} from '../utils/heightFormat';
 
-export function PreferencesScreen({ navigation }: PreferencesScreenProps) {
-  const { onboarding, updatePreferences } = useApp();
-  const prefs = onboarding.preferences;
+export function PreferencesScreen({ navigation, route }: PreferencesScreenProps) {
+  const fromSettings = route.params?.fromSettings === true;
+  const { onboarding, preferences, updatePreferences } = useApp();
+  const prefs = fromSettings ? preferences : onboarding.preferences;
 
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [ageRangeMin, setAgeRangeMin] = useState(prefs.ageRangeMin ?? 21);
   const [ageRangeMax, setAgeRangeMax] = useState(prefs.ageRangeMax ?? 40);
+
+  const initialMin = inchesToFeetInches(prefs.heightMinInches ?? 60);
+  const initialMax = inchesToFeetInches(prefs.heightMaxInches ?? 84);
+  const [minFeet, setMinFeet] = useState(initialMin.feet);
+  const [minInches, setMinInches] = useState(initialMin.inches);
+  const [maxFeet, setMaxFeet] = useState(initialMax.feet);
+  const [maxInches, setMaxInches] = useState(initialMax.inches);
+
   const [maxDistanceMiles, setMaxDistanceMiles] = useState(prefs.maxDistanceMiles ?? 25);
   const [preferredOrientations, setPreferredOrientations] = useState<SexualOrientation[]>(
     prefs.preferredOrientations ?? [],
@@ -25,50 +54,84 @@ export function PreferencesScreen({ navigation }: PreferencesScreenProps) {
   const [preferredLookingFor, setPreferredLookingFor] = useState<LookingFor[]>(
     prefs.preferredLookingFor ?? [],
   );
-  const [preferredQueerPreferences, setPreferredQueerPreferences] = useState<QueerPreference[]>(
-    prefs.preferredQueerPreferences ?? [],
+  const [preferredPresentationTags, setPreferredPresentationTags] = useState<PresentationTag[]>(
+    prefs.preferredPresentationTags ?? [],
   );
+  const [dealbreakers, setDealbreakers] = useState<string[]>(prefs.dealbreakers ?? []);
+  const [niceToHaves, setNiceToHaves] = useState<string[]>(prefs.niceToHaves ?? []);
 
-  const toggleOrientation = (value: SexualOrientation) => {
-    setPreferredOrientations((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
+  const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
+    setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
-  const toggleLookingFor = (value: LookingFor) => {
-    setPreferredLookingFor((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  };
+  const minHeightError = validateFeetInchesFields(minFeet, minInches);
+  const maxHeightError = validateFeetInchesFields(maxFeet, maxInches);
+  const parsedMin = parseFeetInchesFields(minFeet, minInches);
+  const parsedMax = parseFeetInchesFields(maxFeet, maxInches);
+  const rangeOrderError =
+    parsedMin != null && parsedMax != null && parsedMin > parsedMax
+      ? 'Minimum height cannot be taller than maximum'
+      : null;
 
-  const toggleQueerPref = (value: QueerPreference) => {
-    setPreferredQueerPreferences((prev) =>
-      prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value],
-    );
-  };
+  const bannerMessages = useMemo(() => {
+    if (!submitAttempted) return [];
+    const messages: string[] = [];
+    if (minHeightError) messages.push(`Min height: ${minHeightError}`);
+    if (maxHeightError) messages.push(`Max height: ${maxHeightError}`);
+    if (rangeOrderError) messages.push(rangeOrderError);
+    return messages;
+  }, [submitAttempted, minHeightError, maxHeightError, rangeOrderError]);
+
+  const showHeightErrors = submitAttempted;
 
   const handleContinue = () => {
+    setSubmitAttempted(true);
+
+    if (minHeightError || maxHeightError || rangeOrderError) return;
+
     updatePreferences({
       ageRangeMin,
       ageRangeMax,
+      heightMinInches: parsedMin!,
+      heightMaxInches: parsedMax!,
       maxDistanceMiles,
       preferredOrientations,
       preferredLookingFor,
-      preferredQueerPreferences,
+      preferredQueerRoles: [],
+      preferredPresentationTags,
+      dealbreakers,
+      niceToHaves,
     });
-    navigation.navigate('Verification');
+
+    if (fromSettings) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('Verification', { context: 'onboarding' });
   };
 
   return (
     <ScreenContainer scroll contentStyle={styles.content}>
-      <ProgressBar currentStep={2} totalSteps={3} label="Preferences" />
+      {fromSettings ? (
+        <View style={styles.settingsHeader}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={styles.settingsHeaderTitle}>Match preferences</Text>
+          <View style={styles.backBtn} />
+        </View>
+      ) : (
+        <OnboardingStep
+          flowLabel="Step 2 of 3"
+          currentStep={2}
+          totalSteps={3}
+          title="Your match preferences"
+          subtitle="Tell us who you'd love to meet. Leave sections blank to stay open-minded — we'll still prioritize safety and shared intentions."
+        />
+      )}
 
-      <Text style={styles.title}>Who are you hoping to meet?</Text>
-      <Text style={styles.subtitle}>
-        Set your matching preferences. We'll use these to pair you during speed date windows.
-      </Text>
-
-      <Text style={styles.sectionLabel}>Age range</Text>
+      <SectionHeader title="Age range" />
       <View style={styles.rangeRow}>
         <RangeControl
           label="Min"
@@ -76,7 +139,7 @@ export function PreferencesScreen({ navigation }: PreferencesScreenProps) {
           onDecrement={() => setAgeRangeMin((v) => Math.max(18, v - 1))}
           onIncrement={() => setAgeRangeMin((v) => Math.min(ageRangeMax - 1, v + 1))}
         />
-        <Text style={styles.rangeDash}>—</Text>
+        <Text style={styles.rangeDash}>to</Text>
         <RangeControl
           label="Max"
           value={ageRangeMax}
@@ -85,54 +148,108 @@ export function PreferencesScreen({ navigation }: PreferencesScreenProps) {
         />
       </View>
 
-      <Text style={styles.sectionLabel}>Maximum distance</Text>
-      <View style={styles.chipRow}>
-        {DISTANCE_OPTIONS.map((d) => (
-          <Pressable
-            key={d.value}
-            style={[styles.chip, maxDistanceMiles === d.value && styles.chipActive]}
-            onPress={() => setMaxDistanceMiles(d.value)}
-          >
-            <Text style={[styles.chipText, maxDistanceMiles === d.value && styles.chipTextActive]}>
-              {d.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+      <SectionHeader title="Maximum distance" hint="Drag to set how far you'll match" />
+      <DistanceSlider value={maxDistanceMiles} onChange={setMaxDistanceMiles} />
 
-      <Text style={styles.sectionLabel}>Open to these orientations</Text>
-      <Text style={styles.hint}>Leave empty to stay open to all</Text>
-      <TagSelector
-        options={ORIENTATION_OPTIONS}
-        selected={preferredOrientations}
-        onToggle={toggleOrientation}
+      <SectionHeader
+        title="Height preference"
+        hint={showHeightErrors ? undefined : 'Optional range for match fit'}
+        error={
+          showHeightErrors && rangeOrderError && !minHeightError && !maxHeightError
+            ? rangeOrderError
+            : undefined
+        }
       />
+      <View style={styles.heightRow}>
+        <View style={styles.heightField}>
+          <HeightFields
+            label="Min"
+            feet={minFeet}
+            inches={minInches}
+            onFeetChange={setMinFeet}
+            onInchesChange={setMinInches}
+            error={showHeightErrors ? minHeightError ?? undefined : undefined}
+          />
+        </View>
+        <View style={styles.heightField}>
+          <HeightFields
+            label="Max"
+            feet={maxFeet}
+            inches={maxInches}
+            onFeetChange={setMaxFeet}
+            onInchesChange={setMaxInches}
+            error={showHeightErrors ? maxHeightError ?? undefined : undefined}
+          />
+        </View>
+      </View>
+      {!showHeightErrors && !minHeightError && !maxHeightError && parsedMin !== null && parsedMax !== null && (
+        <Text style={styles.heightPrefLabel}>
+          {formatHeightInches(parsedMin)} – {formatHeightInches(parsedMax)}
+        </Text>
+      )}
 
-      <Text style={styles.sectionLabel}>Their dating intentions</Text>
+      <SectionHeader
+        title="Dating intention compatibility"
+        hint="Whose goals align with yours?"
+      />
       <TagSelector
         options={LOOKING_FOR_OPTIONS}
         selected={preferredLookingFor}
-        onToggle={toggleLookingFor}
+        onToggle={(v) => toggle(preferredLookingFor, v, setPreferredLookingFor)}
       />
 
-      <Text style={styles.sectionLabel}>Preference compatibility</Text>
-      <Text style={styles.hint}>Optional queer-specific matching signals</Text>
+      <SectionHeader title="Orientation" hint="Leave empty to stay open to all" />
       <TagSelector
-        options={QUEER_PREFERENCE_OPTIONS}
-        selected={preferredQueerPreferences}
-        onToggle={toggleQueerPref}
+        options={ORIENTATION_OPTIONS}
+        selected={preferredOrientations}
+        onToggle={(v) => toggle(preferredOrientations, v, setPreferredOrientations)}
+      />
+
+      <SectionHeader title="Presentation compatibility" hint="Optional" />
+      <TagSelector
+        options={PRESENTATION_OPTIONS}
+        selected={preferredPresentationTags}
+        onToggle={(v) => toggle(preferredPresentationTags, v, setPreferredPresentationTags)}
+      />
+
+      <SectionHeader
+        title="Dealbreakers"
+        hint="Only traits someone can list on their profile — add yours under Lifestyle & values"
+      />
+      <ChipGrid
+        options={DEALBREAKER_OPTIONS}
+        selected={dealbreakers}
+        onToggle={(v) => toggle(dealbreakers, v, setDealbreakers)}
+      />
+
+      <SectionHeader
+        title="Nice-to-haves"
+        hint="Profile tags or verified status — same options people choose about themselves"
+      />
+      <ChipGrid
+        options={NICE_TO_HAVE_OPTIONS}
+        selected={niceToHaves}
+        onToggle={(v) => toggle(niceToHaves, v, setNiceToHaves)}
       />
 
       <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Private matching balance</Text>
-        <Text style={styles.infoText}>
-          We may use internal compatibility signals — including a private attractiveness
-          balance — to improve pairings over time. This is never shown on your profile
-          or shared with other users.
-        </Text>
+        <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
+        <View style={styles.infoContent}>
+          <Text style={styles.infoTitle}>Thoughtful matching</Text>
+          <Text style={styles.infoText}>{COPY.matchFitPrivate}</Text>
+        </View>
       </View>
 
-      <Button title="Continue to verification" onPress={handleContinue} size="lg" style={styles.btn} />
+      <FormErrorBanner messages={bannerMessages} />
+      <Button
+        title={fromSettings ? 'Save preferences' : 'Continue to verification'}
+        onPress={handleContinue}
+        size="lg"
+        style={styles.btn}
+      />
+      {!fromSettings && (
+        <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />
+      )}
     </ScreenContainer>
   );
 }
@@ -167,28 +284,7 @@ function RangeControl({
 const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.md,
-  },
-  title: {
-    ...typography.title,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-  },
-  sectionLabel: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.text,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  hint: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginBottom: spacing.sm,
+    paddingBottom: spacing.xl,
   },
   rangeRow: {
     flexDirection: 'row',
@@ -225,6 +321,7 @@ const styles = StyleSheet.create({
   },
   rangeValue: {
     ...typography.title,
+    fontSize: 22,
     color: colors.text,
     minWidth: 40,
     textAlign: 'center',
@@ -234,39 +331,33 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.lg,
   },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  chip: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  chipActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.surfaceAlt,
-  },
-  chipText: {
+  heightPrefLabel: {
     ...typography.bodySmall,
-    color: colors.text,
-  },
-  chipTextActive: {
-    color: colors.primaryDark,
     fontWeight: '600',
+    color: colors.primaryDark,
+    marginBottom: spacing.md,
+    textAlign: 'center',
+  },
+  heightRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  heightField: {
+    flex: 1,
   },
   infoBox: {
+    flexDirection: 'row',
+    gap: spacing.sm,
     backgroundColor: colors.surfaceAlt,
-    borderRadius: 12,
+    borderRadius: borderRadius.md,
     padding: spacing.md,
     marginTop: spacing.lg,
     borderLeftWidth: 3,
     borderLeftColor: colors.primaryLight,
+  },
+  infoContent: {
+    flex: 1,
   },
   infoTitle: {
     ...typography.bodySmall,
@@ -281,6 +372,23 @@ const styles = StyleSheet.create({
   },
   btn: {
     marginTop: spacing.lg,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  settingsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.lg,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingsHeaderTitle: {
+    ...typography.subtitle,
+    color: colors.text,
+    fontWeight: '700',
   },
 });
