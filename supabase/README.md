@@ -30,14 +30,22 @@ In the Supabase Dashboard, open **SQL Editor** and run **in order**:
 
 1. `supabase/migrations/001_initial_schema.sql`
 2. `supabase/migrations/002_matching_queue_rpc.sql`
+3. `supabase/migrations/003_feedback_match_rpc.sql`
+4. `supabase/migrations/004_messages_match_update.sql`
+5. `supabase/migrations/005_matching_priority_order.sql`
+6. `supabase/migrations/006_auto_pairing.sql`
+7. `supabase/migrations/007_server_pairing.sql`
+8. `supabase/migrations/008_profile_photos_storage.sql`
 
-## 4. Enable Realtime (queue + speed dates)
+## 4. Enable Realtime (queue + speed dates + feedback + messages)
 
 In **Database → Replication**, enable Realtime for:
 
 - `queue_entries`
 - `speed_dates`
-- `matches` (optional, for future messaging)
+- `date_feedback`
+- `matches`
+- `messages`
 
 ## 5. Auth settings (recommended)
 
@@ -58,30 +66,120 @@ Phone OTP can be added later (requires SMS provider).
 | Block / unblock | Syncs to `blocked_users` |
 | Lobby queue join/leave | Writes to `queue_entries` |
 | Queue counts (live window) | Read from `queue_entries` |
-| Dev pairing engine | `apply_queue_pair` RPC + `pairingEngine.ts` |
+| Automatic pairing | Client worker (15s) + optional Edge Function cron |
+| Dev pairing engine | `SpeedSparkMatchingDev.runDevPairing()` still available |
+| Post-date feedback | `date_feedback` via `submit_date_feedback_and_resolve` RPC |
+| Mutual matches | `matches` row when both users say yes |
+| Messaging | `messages` table + realtime thread updates |
 | Phone sign up / OTP | Still uses demo flow (mock) |
 
 Without `.env`, the app runs in **full demo mode** with mock data.
 
-## 7. Testing queue & matching (dev)
+## 7. Automatic pairing (production)
+
+Matching and pairing execute **server-side only** (Edge Function + service role). Client RLS on `dating_preferences` is unchanged.
+
+### Architecture
+
+1. **`get_window_matching_context` RPC** (`007_server_pairing.sql`) — `SECURITY DEFINER`, **`service_role` only**. Returns profiles + preferences for **waiting** queue users in one window, plus blocks, reports, recent pairs, and appearance scores. No broad RLS weakening.
+2. **`pair-live-windows` Edge Function** — runs `pairingEngine` with service role, calls the RPC for candidate data, applies greedy pairing, writes `pairing_run_logs`.
+3. **In-app worker** (`PairingWorkerBootstrap`) — every **15s**, invokes the Edge Function (does not run matching locally).
+4. **Distributed locks** (`006`) + **`apply_queue_pair` RPC** — prevent duplicate pairs and race failures.
+
+Pairing runs automatically when:
+
+1. **In-app worker** — logged-in user triggers Edge Function invoke every 15s.
+2. **Edge Function cron (recommended for 24/7)** — schedule `pair-live-windows` independently of app sessions.
+
+### Deploy Edge Function
+
+```bash
+supabase secrets set PAIRING_CRON_SECRET=your-random-secret
+supabase functions deploy pair-live-windows --no-verify-jwt
+```
+
+Add to `.env` (same secret value):
+
+```
+EXPO_PUBLIC_PAIRING_INVOKE_SECRET=your-random-secret
+```
+
+Schedule via **Dashboard → Edge Functions → pair-live-windows → Cron** (e.g. `*/15 * * * * *` every 15s if supported, or every minute: `* * * * *`).
+
+Or invoke manually:
+
+```bash
+curl -X POST "https://YOUR_PROJECT.supabase.co/functions/v1/pair-live-windows" \
+  -H "Authorization: Bearer YOUR_ANON_KEY" \
+  -H "x-pairing-secret: your-random-secret"
+```
+
+The Edge Function uses the **service role** and `get_window_matching_context` for scoped, auditable matching reads.
+
+### Configuration
+
+Edit `src/constants/autoPairing.ts`:
+
+- `AUTO_PAIRING_INTERVAL_MS` — client worker interval (default 15000)
+- `PAIRING_LOCK_TTL_SECONDS` — distributed lock TTL (default 25)
+- `PAIRING_MIN_WAITING_USERS` — minimum queue size before pairing (default 2)
+
+### Logs
+
+- Metro console: `[SpeedSpark Backend] pairing.*` events
+- Database: `pairing_run_logs` table (pairs created, unmatched, skipped)
+
+## 8. Testing queue & matching (dev)
 
 After two test users have signed up and completed onboarding:
 
-1. Run migration `002_matching_queue_rpc.sql`.
-2. In Metro, open the dev console and run:
+1. Run migrations through `007_server_pairing.sql`.
+2. Seed a live window (if none exists):
 
 ```js
 await globalThis.SpeedSparkMatchingDev.seedDevLiveWindow()
-// copy the returned window id
+```
+
+3. Both users: open app → lobby → **Join queue** (or simulate):
+
+```js
 await globalThis.SpeedSparkMatchingDev.simulateQueuePopulation('WINDOW_ID', ['USER_A_UUID', 'USER_B_UUID'])
+```
+
+4. **Automatic pairing** should create a `speed_dates` row within ~15s (no manual `runDevPairing` required). Both apps navigate to Active Date via realtime.
+
+5. Manual override still works:
+
+```js
 await globalThis.SpeedSparkMatchingDev.runDevPairing('WINDOW_ID')
 await globalThis.SpeedSparkMatchingDev.printDevQueueReport('WINDOW_ID')
 ```
 
-3. In the app lobby (with Supabase configured), **Join queue** writes a `queue_entries` row (`status: waiting`).
-4. Confirm in **Table Editor** → `queue_entries` and `speed_dates` after pairing.
+6. Confirm in **Table Editor** → `queue_entries`, `speed_dates`, `pairing_run_logs`.
 
-## 8. Optional: Supabase CLI
+## 9. Testing feedback & mutual matches
+
+After both users complete the same speed date (pair → Active Date → timer ends):
+
+1. Run migration `003_feedback_match_rpc.sql`.
+2. **User A** submits feedback with **Yes**.
+3. User A should see **Waiting to hear back** on the match result screen.
+4. **User B** submits feedback with **Yes**.
+5. Confirm `date_feedback` has two rows and `matches` has one row for the pair.
+6. Both users should see **It's a mutual match!** and **Send a message** opens `Messages` with the real `matchId` UUID.
+7. If either user submits **No**, no `matches` row is created.
+
+## 10. Testing messages
+
+After a mutual match exists:
+
+1. Run migration `004_messages_match_update.sql`.
+2. From **Match result**, tap **Send a message** (real `matchId` in route).
+3. Send a message — confirm a row in `messages` and `matches.last_message_at` updated.
+4. Open **Messages** on the second user — message appears via realtime or refresh.
+5. Match list shows the real partner profile name.
+
+## 11. Optional: Supabase CLI
 
 ```bash
 brew install supabase/tap/supabase
@@ -98,14 +196,29 @@ supabase db push
 | `matchingService.ts` | compatibility score + filters |
 | `matchingData.ts` | load profiles/prefs for waiting users |
 | `pairingEngine.ts` | greedy pairing + RPC apply |
+| `pairingCoordinator.ts` | scan live windows, locks, run logs |
+| `autoPairingWorker.ts` | in-app interval worker |
 | `speedDates.ts` | active speed date reads + RPC |
+| `dateFeedback.ts` | submit feedback, resolve mutual match |
+| `messages.ts` | match list, threads, send message |
 | `windows.ts` | speed date windows CRUD/read |
-| `realtimeSubscriptions.ts` | queue + speed date + match channels |
+| `realtimeSubscriptions.ts` | queue + speed date + feedback + match + message channels |
 | `dev/matchingDev.ts` | seed window, simulate queue, run pairing |
+
+## 12. Profile photos
+
+Bucket: `profile-photos` (public read, per-user write folder `{userId}/{photoId}.ext`).
+
+| Step | Action |
+|------|--------|
+| Upload | Settings → Manage profile, or onboarding (optional when Supabase on) |
+| Storage | Supabase Dashboard → Storage → `profile-photos` |
+| Metadata | Table Editor → `profile_photos` |
+| Limits | JPEG/PNG/WebP, max 5 MB |
+
+After upload, restart or re-open the app — `fetchProfile` loads `profile_photos` into `UserProfile.photos`.
 
 ## Next backend steps
 
-- Wire `subscribeToSpeedDatesForUser` into queue UI when paired
-- Photo upload to `profile-photos` bucket
-- Real-time messages subscription
+- Tune Edge Function cron frequency for your window size
 - Phone auth via Supabase + Twilio

@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { registerDefaultDbClientFactory } from './dbClient';
 import { logSupabaseRequest } from '../utils/supabaseDebug';
 import {
   SUPABASE_ANON_KEY,
@@ -78,3 +79,5 @@ export function requireSupabase(): SupabaseClient {
   }
   return supabase;
 }
+
+registerDefaultDbClientFactory(() => requireSupabase());

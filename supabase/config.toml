@@ -1,0 +1,2 @@
+[functions.pair-live-windows]
+verify_jwt = false

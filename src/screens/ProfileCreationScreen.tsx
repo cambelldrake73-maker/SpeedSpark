@@ -25,6 +25,7 @@ import {
 import { spacing } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { syncProfilePhotoSlots } from '../services/profilePhotos';
 import { isSupabaseConfigured } from '../services/supabaseEnv';
 import { formatAuthErrorForUser } from '../utils/authErrors';
 import type {
@@ -109,7 +110,7 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
   const { onboarding, updateProfile, saveProfileToServer } = useApp();
   const { session } = useAuth();
   const profile = onboarding.profile;
-  const skipPhotos = isSupabaseConfigured;
+  const photosOptional = isSupabaseConfigured;
 
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -165,9 +166,9 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
           lookingFor,
           photos,
         },
-        { requirePhotos: !skipPhotos },
+        { requirePhotos: !photosOptional },
       ),
-    [name, age, deviceLocation, heightFeet, heightInches, lookingFor, photos, skipPhotos],
+    [name, age, deviceLocation, heightFeet, heightInches, lookingFor, photos, photosOptional],
   );
 
   const showErrors = submitAttempted;
@@ -195,7 +196,7 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
         lookingFor,
         photos,
       },
-      { requirePhotos: !skipPhotos },
+      { requirePhotos: !photosOptional },
     );
 
     if (result.banner.length > 0) return;
@@ -224,10 +225,12 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
 
     updateProfile(profileUpdates);
 
-    if (skipPhotos && userId) {
+    if (isSupabaseConfigured && userId) {
       setIsSaving(true);
       try {
-        await saveProfileToServer(profileUpdates);
+        const saved = await saveProfileToServer(profileUpdates);
+        const photoUrls = await syncProfilePhotoSlots(userId, photos);
+        updateProfile({ ...saved, photos: photoUrls });
         navigation.navigate('Preferences');
       } catch (error) {
         setSaveError(formatAuthErrorForUser(error));
@@ -259,17 +262,15 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
       <SectionHeader
         title="Photos"
         hint={
-          skipPhotos
-            ? 'Photo upload coming soon — finish the fields below to continue'
+          photosOptional
+            ? 'Photos are optional for now — add up to 6 if you like'
             : showErrors
               ? undefined
               : `Add at least ${REQUIRED_PHOTOS} photos — tap any slot to upload or take a picture`
         }
         error={fieldErrors.photos}
       />
-      {!skipPhotos ? (
-        <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
-      ) : null}
+      <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
 
       <SectionHeader title="Basics" />
       <Input

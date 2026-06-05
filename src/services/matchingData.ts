@@ -1,10 +1,14 @@
 import type { DatingPreferences, UserProfile } from '../types';
 import type { MatchCandidate } from '../types/matchingBackend';
-import { fetchPreferences, fetchProfile } from './profiles';
-import { getWaitingQueueEntries } from './queueService';
+import { fetchBlockedUserIds } from './blocksRead';
 import { logBackendInfo } from './backendLogger';
-import { fetchBlockedUserIds } from './blocks';
+import { fetchPreferences, fetchProfile } from './profilesRead';
+import { getWaitingQueueEntries } from './queueService';
 
+/**
+ * Client-side candidate loader (subject to RLS). Not used for production pairing —
+ * server pairing uses get_window_matching_context RPC via matchingDataServer.ts.
+ */
 export async function loadMatchCandidates(windowId: string): Promise<MatchCandidate[]> {
   const entries = await getWaitingQueueEntries(windowId);
   const userIds = entries.map((e) => e.userId);

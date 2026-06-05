@@ -22,7 +22,11 @@ import {
   PRESENTATION_OPTIONS,
 } from '../constants/options';
 import { colors, spacing, typography } from '../constants/theme';
+import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { syncProfilePhotoSlots } from '../services/profilePhotos';
+import { isSupabaseConfigured } from '../services/supabaseEnv';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import type {
   GenderIdentity,
   LookingFor,
@@ -41,10 +45,13 @@ const MAX_PHOTOS = 6;
 const REQUIRED_PHOTOS = 3;
 
 export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
-  const { currentUser, updateCurrentUser } = useApp();
+  const { session } = useAuth();
+  const { currentUser, updateCurrentUser, saveProfileToServer } = useApp();
   const profile = currentUser;
 
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [name, setName] = useState(profile.name ?? '');
   const [age, setAge] = useState(profile.age ? String(profile.age) : '');
   const [deviceLocation, setDeviceLocation] = useState<ResolvedLocation | null>(() => {
@@ -98,27 +105,48 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSubmitAttempted(true);
+    setSaveError(null);
     if (validation.length > 0) return;
 
     const parsedHeight = parseFeetInchesFields(heightFeet, heightInches)!;
-    updateCurrentUser({
+    const userId = session?.user?.id ?? profile.id;
+    const profileUpdates = {
       name: name.trim(),
       age: parseInt(age, 10),
       location: deviceLocation!.label,
       locationLatitude: deviceLocation!.latitude,
       locationLongitude: deviceLocation!.longitude,
       heightInches: parsedHeight,
-      photos: photos.filter(Boolean),
       genderIdentity,
       sexualOrientation,
       lookingFor,
       presentationTags,
       personalityTags,
       lifestyleTags,
-    });
-    navigation.goBack();
+    };
+
+    if (!isSupabaseConfigured || !userId || userId === 'user-1') {
+      updateCurrentUser({
+        ...profileUpdates,
+        photos: photos.filter(Boolean),
+      });
+      navigation.goBack();
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const photoUrls = await syncProfilePhotoSlots(userId, photos);
+      const saved = await saveProfileToServer({ ...profileUpdates, id: userId, photos: photoUrls });
+      updateCurrentUser(saved);
+      navigation.goBack();
+    } catch (error) {
+      setSaveError(formatAuthErrorForUser(error));
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -202,8 +230,17 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
         maxSelect={6}
       />
 
-      <FormErrorBanner messages={submitAttempted ? validation : []} />
-      <Button title="Save changes" onPress={handleSave} size="lg" style={styles.btn} />
+      <FormErrorBanner
+        messages={[...(submitAttempted ? validation : []), ...(saveError ? [saveError] : [])]}
+      />
+      <Button
+        title="Save changes"
+        onPress={() => void handleSave()}
+        size="lg"
+        style={styles.btn}
+        loading={isSaving}
+        disabled={isSaving}
+      />
     </ScreenContainer>
   );
 }

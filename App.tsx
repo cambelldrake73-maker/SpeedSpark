@@ -3,6 +3,7 @@ import { Platform, StyleSheet, View } from 'react-native';
 import { RootErrorBoundary } from './src/components/RootErrorBoundary';
 import { AppProvider } from './src/context/AppContext';
 import { AuthProvider } from './src/context/AuthContext';
+import { PairingWorkerBootstrap } from './src/context/PairingWorkerBootstrap';
 import { SessionBootstrap } from './src/context/SessionBootstrap';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { colors } from './src/constants/theme';
@@ -50,6 +51,7 @@ export default function App() {
         <AuthProvider>
           <AppProvider>
             <SessionBootstrap />
+            <PairingWorkerBootstrap />
             <StatusBar style="light" />
             <RootNavigator />
           </AppProvider>

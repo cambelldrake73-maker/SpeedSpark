@@ -80,6 +80,17 @@ export interface UserProfile {
   internalMatchFit?: number;
 }
 
+export type MatchingPriorityCategory =
+  | 'ageFit'
+  | 'distanceFit'
+  | 'datingIntentionFit'
+  | 'queerRoleFit'
+  | 'presentationFit'
+  | 'heightFit'
+  | 'personalityVibeFit'
+  | 'lifestyleFit'
+  | 'appearanceFit';
+
 export interface DatingPreferences {
   ageRangeMin: number;
   ageRangeMax: number;
@@ -92,6 +103,8 @@ export interface DatingPreferences {
   preferredPresentationTags: PresentationTag[];
   dealbreakers: string[];
   niceToHaves: string[];
+  /** Most important → least important matching categories. */
+  matchingPriorityOrder?: MatchingPriorityCategory[];
 }
 
 export interface SpeedDateWindow {

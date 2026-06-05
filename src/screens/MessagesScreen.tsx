@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -22,17 +22,22 @@ import {
 } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { MOCK_MATCHES, MOCK_MESSAGES } from '../data/mockMessages';
+import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { useMessagesBackend } from '../hooks/useMessagesBackend';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import type { Match, Message } from '../types';
 import type { MessagesScreenProps } from '../navigation/types';
 import { getMessageThreadMeta, groupMessagesByMatch } from '../utils/messageThread';
 
 export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
+  const { session } = useAuth();
   const { currentUser, blockUser, isBlocked } = useApp();
   const initialMatchId = route.params?.matchId;
+  const userId = session?.user?.id ?? currentUser.id;
 
-  const [matches, setMatches] = useState<Match[]>(MOCK_MATCHES);
-  const [messagesByMatch, setMessagesByMatch] = useState<Record<string, Message[]>>(() =>
+  const [mockMatches, setMockMatches] = useState<Match[]>(MOCK_MATCHES);
+  const [mockMessagesByMatch, setMockMessagesByMatch] = useState<Record<string, Message[]>>(() =>
     groupMessagesByMatch(MOCK_MESSAGES),
   );
   const [lastReadAt, setLastReadAt] = useState<Record<string, string>>({});
@@ -46,12 +51,23 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
+  const backend = useMessagesBackend(userId, activeMatchId, initialMatchId);
+  const matches = backend.useBackend ? backend.matches : mockMatches;
+  const messagesByMatch = backend.useBackend ? backend.messagesByMatch : mockMessagesByMatch;
+
+  useEffect(() => {
+    if (backend.error) {
+      setActionNotice(backend.error);
+    }
+  }, [backend.error]);
+
   const visibleMatches = useMemo(
     () => matches.filter((match) => !isBlocked(match.user.id)),
     [matches, isBlocked],
   );
 
   const activeMatch = matches.find((m) => m.id === activeMatchId) ?? null;
+  const showChat = !showMatchList && Boolean(activeMatchId) && Boolean(activeMatch);
   const messages = activeMatchId ? (messagesByMatch[activeMatchId] ?? []) : [];
   const profileUser =
     matches.find((m) => m.user.id === profileUserId)?.user ??
@@ -80,19 +96,32 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
     markMatchRead(matchId, threadMessages);
   };
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!draft.trim() || !activeMatch) return;
+
+    const text = draft.trim();
+
+    if (backend.useBackend) {
+      try {
+        const sent = await backend.sendMessage(activeMatch.id, text);
+        setLastReadAt((prev) => ({ ...prev, [activeMatch.id]: sent.sentAt }));
+        setDraft('');
+      } catch (error) {
+        setActionNotice(formatAuthErrorForUser(error));
+      }
+      return;
+    }
 
     const sentAt = new Date().toISOString();
     const newMessage: Message = {
       id: `msg-${Date.now()}`,
       matchId: activeMatch.id,
       senderId: currentUser.id,
-      text: draft.trim(),
+      text,
       sentAt,
     };
 
-    setMessagesByMatch((prev) => ({
+    setMockMessagesByMatch((prev) => ({
       ...prev,
       [activeMatch.id]: [...(prev[activeMatch.id] ?? []), newMessage],
     }));
@@ -148,12 +177,16 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
   const confirmUnmatch = () => {
     if (!activeMatch) return;
     setShowUnmatchConfirm(false);
-    setMatches((prev) => prev.filter((m) => m.id !== activeMatch.id));
-    setMessagesByMatch((prev) => {
-      const next = { ...prev };
-      delete next[activeMatch.id];
-      return next;
-    });
+    if (backend.useBackend) {
+      backend.removeMatchLocally(activeMatch.id);
+    } else {
+      setMockMatches((prev) => prev.filter((m) => m.id !== activeMatch.id));
+      setMockMessagesByMatch((prev) => {
+        const next = { ...prev };
+        delete next[activeMatch.id];
+        return next;
+      });
+    }
     setActiveMatchId(null);
     setShowMatchList(true);
     setActionNotice(`You unmatched with ${activeMatch.user.name}.`);
@@ -183,18 +216,22 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
     if (!activeMatch) return;
     setShowBlockConfirm(false);
     blockUser({ id: activeMatch.user.id, name: activeMatch.user.name });
-    setMatches((prev) => prev.filter((m) => m.id !== activeMatch.id));
-    setMessagesByMatch((prev) => {
-      const next = { ...prev };
-      delete next[activeMatch.id];
-      return next;
-    });
+    if (backend.useBackend) {
+      backend.removeMatchLocally(activeMatch.id);
+    } else {
+      setMockMatches((prev) => prev.filter((m) => m.id !== activeMatch.id));
+      setMockMessagesByMatch((prev) => {
+        const next = { ...prev };
+        delete next[activeMatch.id];
+        return next;
+      });
+    }
     setActiveMatchId(null);
     setShowMatchList(true);
     setActionNotice(`You blocked ${activeMatch.user.name}.`);
   };
 
-  if (showMatchList || !activeMatch) {
+  if (!showChat || !activeMatch) {
     return (
       <ScreenContainer contentStyle={styles.content}>
         <View style={styles.header}>
@@ -346,7 +383,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
           />
           <Pressable
             style={[styles.sendBtn, !draft.trim() && styles.sendBtnDisabled]}
-            onPress={sendMessage}
+            onPress={() => void sendMessage()}
             disabled={!draft.trim()}
           >
             <Ionicons name="send" size={20} color={colors.surface} />

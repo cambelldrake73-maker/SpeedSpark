@@ -3,8 +3,18 @@
  * Call from Metro console or temporary __DEV__ buttons — not for production UI.
  */
 import { logBackendInfo } from '../backendLogger';
-import { runPairingForWindow } from '../pairingEngine';
+import { fetchBlockedUserIds } from '../blocksRead';
+import { fetchAppearanceFitScores } from '../matchingAppearance';
+import { loadUserMatchingContext } from '../matchingData';
+import {
+  evaluateCompatibility,
+  scoreDirectionalFit,
+  type MatchingContext,
+} from '../matchingService';
+import { fetchReportedPairKeys } from '../matchingSafety';
+import { invokeServerPairing } from '../pairingRemote';
 import { joinQueue, getQueueCounts, getWaitingQueueEntries } from '../queueService';
+import { fetchRecentSpeedDatePairKeys } from '../speedDatesPairing';
 import { fetchSpeedDateWindows, upsertSpeedDateWindow } from '../windows';
 import { isSupabaseConfigured } from '../supabaseEnv';
 
@@ -45,9 +55,23 @@ export async function simulateQueuePopulation(
 export async function runDevPairing(windowId: string) {
   const waiting = await getWaitingQueueEntries(windowId);
   logBackendInfo('dev.pairing.start', { windowId, waiting: waiting.length });
-  const outcome = await runPairingForWindow(windowId);
-  logBackendInfo('dev.pairing.done', { ...outcome });
-  return outcome;
+  const response = await invokeServerPairing({ windowId });
+  if (!response.ok) {
+    throw new Error(response.error ?? 'Server pairing invoke failed');
+  }
+  const run = response.runs?.find((entry) => entry.windowId === windowId) ?? response.runs?.[0];
+  logBackendInfo('dev.pairing.done', {
+    windowId,
+    pairsCreated: run?.pairsCreated ?? response.totalPairsCreated ?? 0,
+    response,
+  });
+  return {
+    windowId,
+    pairsCreated: run?.pairsCreated ?? 0,
+    speedDateIds: [],
+    unmatchedUserIds: [],
+    skippedPairs: [],
+  };
 }
 
 export async function printDevQueueReport(windowId: string) {
@@ -59,11 +83,73 @@ export async function printDevQueueReport(windowId: string) {
   console.log('[SpeedSpark Dev] waiting entries', waiting);
 }
 
+export async function compareDevMatchScores(userAId: string, userBId: string) {
+  const [ctxA, ctxB, blockedA, blockedB, recentPairKeys, reportedPairKeys] = await Promise.all([
+    loadUserMatchingContext(userAId),
+    loadUserMatchingContext(userBId),
+    fetchBlockedUserIds(userAId),
+    fetchBlockedUserIds(userBId),
+    fetchRecentSpeedDatePairKeys([userAId, userBId]),
+    fetchReportedPairKeys([userAId, userBId]),
+  ]);
+
+  if (!ctxA.profile || !ctxB.profile) {
+    throw new Error('Both users need profiles before comparing scores.');
+  }
+
+  const appearanceScoresByViewer = new Map<string, Map<string, number>>([
+    [userAId, await fetchAppearanceFitScores(userAId, [userBId])],
+    [userBId, await fetchAppearanceFitScores(userBId, [userAId])],
+  ]);
+
+  const context: MatchingContext = {
+    recentPairKeys,
+    reportedPairKeys,
+    appearanceScoresByViewer,
+  };
+
+  const aToB = scoreDirectionalFit({
+    viewer: ctxA.profile,
+    viewerPrefs: ctxA.preferences,
+    partner: ctxB.profile,
+    context,
+  });
+  const bToA = scoreDirectionalFit({
+    viewer: ctxB.profile,
+    viewerPrefs: ctxB.preferences,
+    partner: ctxA.profile,
+    context,
+  });
+  const mutual = evaluateCompatibility({
+    userA: { profile: ctxA.profile, preferences: ctxA.preferences },
+    userB: { profile: ctxB.profile, preferences: ctxB.preferences },
+    blockedA,
+    blockedB,
+    context,
+  });
+
+  const report = {
+    userAId,
+    userBId,
+    priorityOrderA: ctxA.preferences.matchingPriorityOrder,
+    priorityOrderB: ctxB.preferences.matchingPriorityOrder,
+    scoreAtoB: aToB.score,
+    scoreBtoA: bToA.score,
+    mutualScore: mutual.score,
+    compatible: mutual.compatible,
+    blockers: mutual.blockers,
+  };
+
+  console.log('[SpeedSpark Dev] compareDevMatchScores', report);
+  return report;
+}
+
 if (__DEV__) {
   (globalThis as Record<string, unknown>).SpeedSparkMatchingDev = {
     seedDevLiveWindow,
     simulateQueuePopulation,
     runDevPairing,
     printDevQueueReport,
+    compareDevMatchScores,
   };
 }

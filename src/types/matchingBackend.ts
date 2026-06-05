@@ -56,10 +56,19 @@ export interface PairingCandidatePair {
   reasons: string[];
 }
 
+export interface PairingEvaluatedPair {
+  userAId: string;
+  userBId: string;
+  score: number;
+  reasons: string[];
+  applied: boolean;
+}
+
 export interface PairingOutcome {
   windowId: string;
   pairsCreated: number;
   speedDateIds: string[];
   unmatchedUserIds: string[];
-  skippedPairs: Array<{ userAId: string; userBId: string; reason: string }>;
+  skippedPairs: Array<{ userAId: string; userBId: string; reason: string; score?: number }>;
+  evaluatedPairs?: PairingEvaluatedPair[];
 }

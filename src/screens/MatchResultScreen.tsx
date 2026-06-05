@@ -4,16 +4,24 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, DatingProfileCard, ScreenContainer } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { MOCK_PARTNER } from '../data/mockUsers';
+import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
+import { useSpeedDateMatchResult } from '../hooks/useSpeedDateMatchResult';
 import type { MatchResultScreenProps } from '../navigation/types';
 
-export function MatchResultScreen({ navigation }: MatchResultScreenProps) {
-  const { lastFeedback, partnerFeedback, currentDatePartner } = useApp();
+export function MatchResultScreen({ navigation, route }: MatchResultScreenProps) {
+  const { dateId } = route.params;
+  const { session } = useAuth();
+  const { currentUser, lastFeedback, partnerFeedback, currentDatePartner } = useApp();
   const partner = currentDatePartner ?? MOCK_PARTNER;
+  const match = useSpeedDateMatchResult(dateId, session?.user?.id ?? currentUser.id);
 
-  const isMutualMatch =
-    lastFeedback?.wouldTalkAgain === true &&
-    partnerFeedback?.wouldTalkAgain === true;
+  const isDemo = !match.useBackend;
+  const isWaiting = !isDemo && match.result?.status === 'waiting';
+  const isMutualMatch = isDemo
+    ? lastFeedback?.wouldTalkAgain === true && partnerFeedback?.wouldTalkAgain === true
+    : match.result?.isMutualMatch === true;
+  const matchId = isDemo ? 'match-1' : match.result?.matchId ?? null;
 
   const joinNextDate = () => {
     navigation.reset({
@@ -32,7 +40,15 @@ export function MatchResultScreen({ navigation }: MatchResultScreenProps) {
   return (
     <ScreenContainer scroll contentStyle={styles.content}>
       <View style={styles.resultHeader}>
-        {isMutualMatch ? (
+        {match.isLoading && !isDemo ? (
+          <>
+            <View style={[styles.matchIcon, styles.noMatchIcon]}>
+              <Ionicons name="hourglass-outline" size={48} color={colors.primaryLight} />
+            </View>
+            <Text style={styles.title}>Checking your match</Text>
+            <Text style={styles.subtitle}>Hang tight — we're loading your result.</Text>
+          </>
+        ) : isMutualMatch ? (
           <>
             <View style={styles.matchIcon}>
               <Ionicons name="heart" size={48} color={colors.primary} />
@@ -41,6 +57,16 @@ export function MatchResultScreen({ navigation }: MatchResultScreenProps) {
             <Text style={styles.subtitle}>
               You and {partner.name} both want to keep talking. Send a message, or jump back in the
               queue for another date.
+            </Text>
+          </>
+        ) : isWaiting ? (
+          <>
+            <View style={[styles.matchIcon, styles.noMatchIcon]}>
+              <Ionicons name="hourglass-outline" size={48} color={colors.primaryLight} />
+            </View>
+            <Text style={styles.title}>Waiting to hear back</Text>
+            <Text style={styles.subtitle}>
+              You said yes — we'll update this screen when {partner.name} submits their feedback.
             </Text>
           </>
         ) : (
@@ -60,21 +86,21 @@ export function MatchResultScreen({ navigation }: MatchResultScreenProps) {
 
       <View style={styles.actions}>
         <Button title="Join next date" onPress={joinNextDate} size="lg" />
-        {isMutualMatch ? (
+        {isMutualMatch && matchId ? (
           <Button
             title="Send a message"
-            onPress={() => navigation.navigate('Messages', { matchId: 'match-1' })}
+            onPress={() => navigation.navigate('Messages', { matchId })}
             variant="outline"
             size="lg"
           />
-        ) : (
+        ) : !isMutualMatch && !isWaiting ? (
           <View style={styles.encouragement}>
             <Text style={styles.encouragementText}>
-              Your private attractiveness rating helps us pair you better next time. Nothing is
-              shared publicly or shown on your profile.
+              {match.error ??
+                'Your private attractiveness rating helps us pair you better next time. Nothing is shared publicly or shown on your profile.'}
             </Text>
           </View>
-        )}
+        ) : null}
         <Button title="Back to lobby" onPress={backToLobby} variant="ghost" size="md" />
       </View>
     </ScreenContainer>

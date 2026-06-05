@@ -20,11 +20,18 @@ import {
   ORIENTATION_OPTIONS,
   PRESENTATION_OPTIONS,
 } from '../constants/options';
+import {
+  DEFAULT_MATCHING_PRIORITY_ORDER,
+  MATCHING_PRIORITY_HINTS,
+  MATCHING_PRIORITY_LABELS,
+  movePriorityItem,
+  normalizeMatchingPriorityOrder,
+} from '../constants/matchingPriorities';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import { isSupabaseConfigured } from '../services/supabaseEnv';
 import { formatAuthErrorForUser } from '../utils/authErrors';
-import type { LookingFor, PresentationTag, SexualOrientation } from '../types';
+import type { LookingFor, MatchingPriorityCategory, PresentationTag, SexualOrientation } from '../types';
 import type { PreferencesScreenProps } from '../navigation/types';
 import {
   formatHeightInches,
@@ -63,6 +70,12 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
   );
   const [dealbreakers, setDealbreakers] = useState<string[]>(prefs.dealbreakers ?? []);
   const [niceToHaves, setNiceToHaves] = useState<string[]>(prefs.niceToHaves ?? []);
+  const [matchingPriorityOrder, setMatchingPriorityOrder] = useState<MatchingPriorityCategory[]>(
+    () =>
+      normalizeMatchingPriorityOrder(
+        prefs.matchingPriorityOrder ?? DEFAULT_MATCHING_PRIORITY_ORDER,
+      ),
+  );
 
   const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -111,6 +124,7 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
       preferredPresentationTags,
       dealbreakers,
       niceToHaves,
+      matchingPriorityOrder,
     };
 
     updatePreferences(prefsUpdate);
@@ -235,6 +249,47 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
         selected={preferredPresentationTags}
         onToggle={(v) => toggle(preferredPresentationTags, v, setPreferredPresentationTags)}
       />
+
+      <SectionHeader
+        title="Rank what matters most"
+        hint="Top = strongest influence on your matches. Private chemistry uses feedback only — never shown publicly."
+      />
+      <View style={styles.priorityList}>
+        {matchingPriorityOrder.map((category, index) => (
+          <View key={category} style={styles.priorityRow}>
+            <View style={styles.priorityRank}>
+              <Text style={styles.priorityRankText}>{index + 1}</Text>
+            </View>
+            <View style={styles.priorityCopy}>
+              <Text style={styles.priorityLabel}>{MATCHING_PRIORITY_LABELS[category]}</Text>
+              <Text style={styles.priorityHint}>{MATCHING_PRIORITY_HINTS[category]}</Text>
+            </View>
+            <View style={styles.priorityActions}>
+              <Pressable
+                style={[styles.priorityBtn, index === 0 && styles.priorityBtnDisabled]}
+                onPress={() =>
+                  setMatchingPriorityOrder((order) => movePriorityItem(order, index, 'up'))
+                }
+                disabled={index === 0}
+              >
+                <Ionicons name="chevron-up" size={18} color={colors.primary} />
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.priorityBtn,
+                  index === matchingPriorityOrder.length - 1 && styles.priorityBtnDisabled,
+                ]}
+                onPress={() =>
+                  setMatchingPriorityOrder((order) => movePriorityItem(order, index, 'down'))
+                }
+                disabled={index === matchingPriorityOrder.length - 1}
+              >
+                <Ionicons name="chevron-down" size={18} color={colors.primary} />
+              </Pressable>
+            </View>
+          </View>
+        ))}
+      </View>
 
       <SectionHeader
         title="Dealbreakers"
@@ -416,5 +471,61 @@ const styles = StyleSheet.create({
     ...typography.subtitle,
     color: colors.text,
     fontWeight: '700',
+  },
+  priorityList: {
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  priorityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.sm,
+  },
+  priorityRank: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priorityRankText: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  priorityCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  priorityLabel: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  priorityHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+  priorityActions: {
+    gap: 2,
+  },
+  priorityBtn: {
+    width: 32,
+    height: 28,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  priorityBtnDisabled: {
+    opacity: 0.35,
   },
 });

@@ -25,28 +25,7 @@ function mapSpeedDate(row: SpeedDateRow): SpeedDateRecord {
   };
 }
 
-export async function applyQueuePair(
-  windowId: string,
-  userAId: string,
-  userBId: string,
-): Promise<string> {
-  const op = 'rpc.apply_queue_pair';
-  logSupabaseRequest(op, { windowId, userAId, userBId });
-
-  const { data, error } = await requireSupabase().rpc('apply_queue_pair', {
-    p_window_id: windowId,
-    p_user_a_id: userAId,
-    p_user_b_id: userBId,
-  });
-
-  if (error) {
-    throwSupabaseError(op, error);
-  }
-
-  const speedDateId = data as string;
-  logBackendInfo('speedDates.pairCreated', { windowId, userAId, userBId, speedDateId });
-  return speedDateId;
-}
+export { applyQueuePair } from './speedDatesPairing';
 
 export async function fetchActiveSpeedDateForUser(
   userId: string,
@@ -94,6 +73,8 @@ export async function fetchSpeedDatesForWindow(windowId: string): Promise<SpeedD
 
   return ((data ?? []) as SpeedDateRow[]).map(mapSpeedDate);
 }
+
+export { fetchRecentSpeedDatePairKeys } from './speedDatesPairing';
 
 export async function updateSpeedDateStatus(
   speedDateId: string,

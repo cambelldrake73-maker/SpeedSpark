@@ -1,7 +1,7 @@
 import type { QueueCounts, QueueEntry, QueueStatusResult } from '../types/matchingBackend';
 import { logSupabaseRequest, throwSupabaseError } from '../utils/supabaseDebug';
 import { logBackendError, logQueueEvent } from './backendLogger';
-import { isSupabaseConfigured, requireSupabase } from './supabase';
+import { isDbAvailable, resolveDbClient } from './dbClient';
 
 interface QueueEntryRow {
   id: string;
@@ -22,14 +22,14 @@ function mapQueueEntry(row: QueueEntryRow): QueueEntry {
 }
 
 export async function getQueueCounts(windowId: string): Promise<QueueCounts> {
-  if (!isSupabaseConfigured) {
+  if (!isDbAvailable()) {
     return { windowId, waiting: 0, paired: 0, left: 0, total: 0 };
   }
 
   const op = 'queue_entries.counts';
   logSupabaseRequest(op, { windowId });
 
-  const { data, error } = await requireSupabase()
+  const { data, error } = await resolveDbClient()
     .from('queue_entries')
     .select('status')
     .eq('window_id', windowId);
@@ -56,7 +56,7 @@ export async function getWaitingQueueEntries(windowId: string): Promise<QueueEnt
   const op = 'queue_entries.selectWaiting';
   logSupabaseRequest(op, { windowId });
 
-  const { data, error } = await requireSupabase()
+  const { data, error } = await resolveDbClient()
     .from('queue_entries')
     .select('*')
     .eq('window_id', windowId)
@@ -74,14 +74,14 @@ export async function getQueueStatus(
   userId: string,
   windowId: string,
 ): Promise<QueueStatusResult> {
-  if (!isSupabaseConfigured) {
+  if (!isDbAvailable()) {
     return { inQueue: false, entry: null };
   }
 
   const op = 'queue_entries.selectForUser';
   logSupabaseRequest(op, { userId, windowId });
 
-  const { data, error } = await requireSupabase()
+  const { data, error } = await resolveDbClient()
     .from('queue_entries')
     .select('*')
     .eq('window_id', windowId)
@@ -108,7 +108,7 @@ export async function joinQueue(userId: string, windowId: string): Promise<Queue
     throw new Error('User id is required to join the queue.');
   }
 
-  if (!isSupabaseConfigured) {
+  if (!isDbAvailable()) {
     throw new Error('Queue is only available when the account server is configured.');
   }
 
@@ -125,7 +125,7 @@ export async function joinQueue(userId: string, windowId: string): Promise<Queue
   const op = 'queue_entries.upsertJoin';
   logSupabaseRequest(op, { userId, windowId });
 
-  const { data, error } = await requireSupabase()
+  const { data, error } = await resolveDbClient()
     .from('queue_entries')
     .upsert(
       {
@@ -150,14 +150,14 @@ export async function joinQueue(userId: string, windowId: string): Promise<Queue
 }
 
 export async function leaveQueue(userId: string, windowId: string): Promise<void> {
-  if (!isSupabaseConfigured) {
+  if (!isDbAvailable()) {
     return;
   }
 
   const op = 'queue_entries.leave';
   logSupabaseRequest(op, { userId, windowId });
 
-  const { error } = await requireSupabase()
+  const { error } = await resolveDbClient()
     .from('queue_entries')
     .update({ status: 'left' })
     .eq('window_id', windowId)

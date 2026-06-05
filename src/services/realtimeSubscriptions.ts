@@ -1,8 +1,27 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import type { Message } from '../types';
 import type { QueueCounts, SpeedDateRecord } from '../types/matchingBackend';
 import { logBackendInfo } from './backendLogger';
 import { getQueueCounts } from './queueService';
 import { isSupabaseConfigured, requireSupabase } from './supabase';
+
+interface MessageRow {
+  id: string;
+  match_id: string;
+  sender_id: string;
+  text: string;
+  sent_at: string;
+}
+
+function mapMessageRow(row: MessageRow): Message {
+  return {
+    id: row.id,
+    matchId: row.match_id,
+    senderId: row.sender_id,
+    text: row.text,
+    sentAt: row.sent_at,
+  };
+}
 
 export type QueueRealtimePayload = {
   windowId: string;
@@ -109,6 +128,88 @@ export function subscribeToSpeedDatesForUser(
     )
     .subscribe((status) => {
       logBackendInfo('realtime.speedDate.subscribe', { userId, status });
+    });
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}
+
+export type FeedbackRealtimePayload = {
+  speedDateId: string;
+  eventType: string;
+};
+
+export function subscribeToFeedbackForSpeedDate(
+  speedDateId: string,
+  onUpdate: (payload: FeedbackRealtimePayload) => void,
+): (() => void) | null {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  const client = requireSupabase();
+  const channelName = `date-feedback-${speedDateId}`;
+
+  const channel: RealtimeChannel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'date_feedback',
+        filter: `speed_date_id=eq.${speedDateId}`,
+      },
+      (payload) => {
+        logBackendInfo('realtime.feedback', {
+          speedDateId,
+          event: payload.eventType,
+        });
+        onUpdate({ speedDateId, eventType: payload.eventType });
+      },
+    )
+    .subscribe((status) => {
+      logBackendInfo('realtime.feedback.subscribe', { speedDateId, status });
+    });
+
+  return () => {
+    void client.removeChannel(channel);
+  };
+}
+
+export function subscribeToMatchMessages(
+  matchId: string,
+  onMessage: (message: Message, eventType: string) => void,
+): (() => void) | null {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
+  const client = requireSupabase();
+  const channelName = `messages-match-${matchId}`;
+
+  const channel: RealtimeChannel = client
+    .channel(channelName)
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `match_id=eq.${matchId}`,
+      },
+      (payload) => {
+        const row = payload.new as MessageRow | undefined;
+        if (!row) {
+          return;
+        }
+        logBackendInfo('realtime.message', { matchId, messageId: row.id });
+        onMessage(mapMessageRow(row), payload.eventType);
+      },
+    )
+    .subscribe((status) => {
+      logBackendInfo('realtime.message.subscribe', { matchId, status });
     });
 
   return () => {

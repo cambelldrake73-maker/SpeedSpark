@@ -1,7 +1,9 @@
+import { normalizeMatchingPriorityOrder } from '../constants/matchingPriorities';
 import type {
   DatingPreferences,
   GenderIdentity,
   LookingFor,
+  MatchingPriorityCategory,
   PresentationTag,
   QueerRole,
   SexualOrientation,
@@ -13,6 +15,7 @@ import {
   logSupabaseRequest,
   throwSupabaseError,
 } from '../utils/supabaseDebug';
+import { fetchProfilePhotoUrls } from './profilePhotos';
 import { isSupabaseConfigured, requireSupabase } from './supabase';
 
 export interface ProfileNameFields {
@@ -54,6 +57,9 @@ function mapPreferencesRow(row: DatingPreferencesRow): Partial<DatingPreferences
     preferredPresentationTags: row.preferred_presentation_tags as PresentationTag[],
     dealbreakers: row.dealbreakers,
     niceToHaves: row.nice_to_haves,
+    matchingPriorityOrder: normalizeMatchingPriorityOrder(
+      row.matching_priority_order as MatchingPriorityCategory[] | undefined,
+    ),
   };
 }
 
@@ -157,63 +163,14 @@ function buildPreferencesUpdatePayload(
   if (preferences.niceToHaves !== undefined) {
     payload.nice_to_haves = preferences.niceToHaves;
   }
+  if (preferences.matchingPriorityOrder !== undefined) {
+    payload.matching_priority_order = preferences.matchingPriorityOrder;
+  }
 
   return payload;
 }
 
-export async function fetchProfile(userId: string): Promise<UserProfile | null> {
-  if (!isSupabaseConfigured) {
-    return null;
-  }
-
-  const client = requireSupabase();
-  const profileOp = 'profiles.select';
-
-  logSupabaseRequest(profileOp, { userId });
-
-  const { data: profile, error: profileError } = await client
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (profileError) {
-    throwSupabaseError(profileOp, profileError);
-  }
-  if (!profile) {
-    console.log('[SpeedSpark Supabase] ✓ profiles.select (no row yet)', { userId });
-    return null;
-  }
-
-  console.log('[SpeedSpark Supabase] ✓ profiles.select', { userId });
-  return mapProfileRow(profile as ProfileRow, []);
-}
-
-export async function fetchPreferences(userId: string): Promise<Partial<DatingPreferences> | null> {
-  if (!isSupabaseConfigured) {
-    return null;
-  }
-
-  const op = 'dating_preferences.select';
-  logSupabaseRequest(op, { userId });
-
-  const { data, error } = await requireSupabase()
-    .from('dating_preferences')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (error) {
-    throwSupabaseError(op, error);
-  }
-  if (!data) {
-    console.log('[SpeedSpark Supabase] ✓ dating_preferences.select (no row yet)', { userId });
-    return null;
-  }
-
-  console.log('[SpeedSpark Supabase] ✓ dating_preferences.select', { userId });
-  return mapPreferencesRow(data as DatingPreferencesRow);
-}
+export { fetchProfile, fetchPreferences } from './profilesRead';
 
 /** Saves profile fields without marking onboarding complete. */
 export async function saveProfileFields(
@@ -239,7 +196,9 @@ export async function saveProfileFields(
   }
 
   console.log('[SpeedSpark Supabase] ✓ profiles.update', { userId });
-  return mapProfileRow(data as ProfileRow, profile.photos ?? []);
+
+  const photos = await fetchProfilePhotoUrls(userId);
+  return mapProfileRow(data as ProfileRow, photos.length > 0 ? photos : (profile.photos ?? []));
 }
 
 /** Saves dating preference fields. */

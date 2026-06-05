@@ -5,22 +5,68 @@ import { Button, DatingProfileCard, ScaleRating, ScreenContainer, SelectableOpti
 import { COPY } from '../constants/options';
 import { colors, spacing, typography } from '../constants/theme';
 import { MOCK_PARTNER } from '../data/mockUsers';
+import { useAuth } from '../context/AuthContext';
 import { simulatePartnerFeedback, useApp } from '../context/AppContext';
+import { submitDateFeedback } from '../services';
+import { formatAuthErrorForUser } from '../utils/authErrors';
+import { isBackendSpeedDateId } from '../utils/speedDateIds';
 import type { PostDateFeedbackScreenProps } from '../navigation/types';
 
 export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackScreenProps) {
   const { partnerId, dateId } = route.params;
-  const { setLastFeedback, setPartnerFeedback, currentDatePartner } = useApp();
+  const { session } = useAuth();
+  const { currentUser, setLastFeedback, setPartnerFeedback, currentDatePartner } = useApp();
   const partner = currentDatePartner ?? MOCK_PARTNER;
   const partnerName = partner.name;
+  const userId = session?.user?.id ?? currentUser.id;
+  const useBackend = isBackendSpeedDateId(dateId) && Boolean(userId);
 
   const [attractivenessRating, setAttractivenessRating] = useState(0);
   const [wantToMatch, setWantToMatch] = useState<boolean | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const canSubmit = attractivenessRating > 0 && wantToMatch !== null;
 
-  const handleSubmit = () => {
-    if (!canSubmit) return;
+  const handleSubmit = async () => {
+    if (!canSubmit || isSubmitting) return;
+
+    setSubmitError(null);
+
+    if (useBackend) {
+      setIsSubmitting(true);
+      try {
+        const { feedback, matchResult } = await submitDateFeedback(
+          userId,
+          dateId,
+          partnerId,
+          attractivenessRating,
+          wantToMatch === true,
+        );
+
+        setLastFeedback(feedback);
+        if (
+          matchResult.partnerFeedbackSubmitted &&
+          matchResult.partnerWouldTalkAgain !== null
+        ) {
+          setPartnerFeedback({
+            dateId,
+            partnerId,
+            attractivenessRating: 0,
+            wouldTalkAgain: matchResult.partnerWouldTalkAgain,
+          });
+        } else {
+          setPartnerFeedback(null);
+        }
+
+        navigation.replace('MatchResult', { partnerId, dateId });
+      } catch (error) {
+        setSubmitError(formatAuthErrorForUser(error));
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
 
     const feedback = {
       dateId,
@@ -84,11 +130,14 @@ export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackSc
         <Text style={styles.privacyText}>{COPY.sparkPrivate}</Text>
       </View>
 
+      {submitError ? <Text style={styles.submitError}>{submitError}</Text> : null}
+
       <Button
         title="Submit"
-        onPress={handleSubmit}
+        onPress={() => void handleSubmit()}
         size="lg"
-        disabled={!canSubmit}
+        disabled={!canSubmit || isSubmitting}
+        loading={isSubmitting}
         style={styles.submitBtn}
       />
     </ScreenContainer>
@@ -151,5 +200,11 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginBottom: spacing.xl,
+  },
+  submitError: {
+    ...typography.caption,
+    color: colors.error,
+    marginBottom: spacing.sm,
+    lineHeight: 18,
   },
 });

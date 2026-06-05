@@ -1,6 +1,8 @@
 /** Trim so .env whitespace/quotes do not break fetch on web. */
 export const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').trim();
 export const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
+/** Optional shared secret for invoking pair-live-windows from the app (must match PAIRING_CRON_SECRET). */
+export const PAIRING_INVOKE_SECRET = (process.env.EXPO_PUBLIC_PAIRING_INVOKE_SECRET ?? '').trim();
 
 export const isSupabaseConfigured =
   SUPABASE_URL.length > 0 && SUPABASE_ANON_KEY.length > 0;

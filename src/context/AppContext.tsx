@@ -20,6 +20,7 @@ import {
   saveProfileFields,
   unblockUserInSupabase,
 } from '../services';
+import { DEFAULT_MATCHING_PRIORITY_ORDER } from '../constants/matchingPriorities';
 import {
   isPreferencesComplete,
   isProfileComplete,
@@ -84,6 +85,7 @@ const defaultPreferences: Partial<DatingPreferences> = {
   preferredPresentationTags: [],
   dealbreakers: [],
   niceToHaves: [],
+  matchingPriorityOrder: [...DEFAULT_MATCHING_PRIORITY_ORDER],
 };
 
 const AppContext = createContext<AppContextValue | undefined>(undefined);

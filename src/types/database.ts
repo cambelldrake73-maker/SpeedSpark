@@ -85,6 +85,7 @@ export interface Database {
           preferred_presentation_tags: string[];
           dealbreakers: string[];
           nice_to_haves: string[];
+          matching_priority_order: string[];
           updated_at: string;
         };
         Insert: {
@@ -100,6 +101,7 @@ export interface Database {
           preferred_presentation_tags?: string[];
           dealbreakers?: string[];
           nice_to_haves?: string[];
+          matching_priority_order?: string[];
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['dating_preferences']['Insert']>;
