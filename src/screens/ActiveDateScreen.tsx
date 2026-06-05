@@ -15,8 +15,9 @@ import type { BlurLevel, VirtualBackground } from '../constants/cameraEffects';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { DATE_DURATION_SECONDS } from '../data/mockSpeedDates';
 import { useMediaAccess } from '../hooks/useMediaAccess';
+import { useSpeedDateCall } from '../hooks/useSpeedDateCall';
 import { useApp } from '../context/AppContext';
-import { updateSpeedDateStatus } from '../services';
+import { isSupabaseConfigured, reportUser, updateSpeedDateStatus } from '../services';
 import type { ActiveDateScreenProps } from '../navigation/types';
 
 const ZOOM_LEVELS = [0, 0.12, 0.24, 0.36];
@@ -24,10 +25,9 @@ const PIP_MARGIN = 12;
 
 export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   const { partner, speedDateId } = route.params;
-  const { blockUser, setCurrentDatePartner } = useApp();
+  const { blockUser, setCurrentDatePartner, currentUser } = useApp();
   const [secondsLeft, setSecondsLeft] = useState(DATE_DURATION_SECONDS);
   const hasEndedRef = useRef(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [selfExpanded, setSelfExpanded] = useState(false);
@@ -45,6 +45,36 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     useMediaAccess();
   const { stageWidth, stageHeight, onStageLayout } = usePiPStageLayout();
 
+  const voiceCallEnabled =
+    Boolean(speedDateId) &&
+    hasMediaAccess &&
+    Boolean(currentUser.id) &&
+    currentUser.id !== 'user-1';
+
+  const {
+    connectionState: voiceConnectionState,
+    partnerConnected,
+    isMuted: voiceMuted,
+    setMuted: setVoiceMuted,
+    statusLabel: voiceStatusLabel,
+    leave: leaveVoiceCall,
+  } = useSpeedDateCall({
+    speedDateId,
+    userId: currentUser.id,
+    enabled: voiceCallEnabled,
+  });
+
+  const [localMuted, setLocalMuted] = useState(false);
+  const isVoiceMuted = speedDateId ? voiceMuted : localMuted;
+
+  const toggleMute = () => {
+    if (speedDateId) {
+      setVoiceMuted(!voiceMuted);
+      return;
+    }
+    setLocalMuted((muted) => !muted);
+  };
+
   useEffect(() => {
     setCurrentDatePartner(partner);
   }, [partner, setCurrentDatePartner]);
@@ -55,11 +85,15 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     }
   }, [selfExpanded]);
 
-  const goToFeedback = useCallback(() => {
+  const goToFeedback = useCallback(async () => {
     if (hasEndedRef.current) {
       return;
     }
     hasEndedRef.current = true;
+
+    if (speedDateId) {
+      await leaveVoiceCall('complete');
+    }
 
     const dateId = speedDateId ?? `date-${Date.now()}`;
 
@@ -73,7 +107,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
       partnerId: partner.id,
       dateId,
     });
-  }, [navigation, partner.id, speedDateId]);
+  }, [navigation, partner.id, speedDateId, leaveVoiceCall]);
 
   useEffect(() => {
     if (secondsLeft <= 0) {
@@ -106,24 +140,40 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     );
   };
 
+  const submitReport = useCallback(async () => {
+    setShowReportConfirm(false);
+    try {
+      if (isSupabaseConfigured && currentUser.id && currentUser.id !== 'user-1') {
+        await reportUser({
+          reporterId: currentUser.id,
+          reportedUserId: partner.id,
+          context: 'call',
+          speedDateId,
+        });
+      }
+    } catch (error) {
+      console.log('[SpeedSpark Safety] Failed to submit report', error);
+    }
+    await goToFeedback();
+  }, [currentUser.id, goToFeedback, partner.id, speedDateId]);
+
   const handleReport = () => {
     if (Platform.OS === 'web') {
       setShowReportConfirm(true);
       return;
     }
     Alert.alert(
-      'Report sent',
-      'Thanks for letting us know. This date will end and our safety team will review (MVP placeholder).',
+      `Report ${partner.name}?`,
+      'Thanks for letting us know. This date will end and our safety team will review.',
       [
-        { text: 'End date now', style: 'destructive', onPress: goToFeedback },
         { text: 'Cancel', style: 'cancel' },
+        { text: 'Report & end', style: 'destructive', onPress: () => void submitReport() },
       ],
     );
   };
 
   const confirmReport = () => {
-    setShowReportConfirm(false);
-    goToFeedback();
+    void submitReport();
   };
 
   const handleBlock = () => {
@@ -145,8 +195,14 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     );
   };
 
-  const confirmBlock = () => {
-    blockUser({ id: partner.id, name: partner.name });
+  const confirmBlock = async () => {
+    if (speedDateId) {
+      await leaveVoiceCall('cancel');
+    }
+    blockUser(
+      { id: partner.id, name: partner.name },
+      speedDateId ? { speedDateId } : undefined,
+    );
     setShowBlockConfirm(false);
     navigation.reset({
       index: 0,
@@ -165,7 +221,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
       facing={facing}
       blurLevel={blurLevel}
       virtualBackground={virtualBackground}
-      mute={isMuted}
+      mute={isVoiceMuted}
       compact={!selfExpanded}
       label="You"
     />
@@ -223,12 +279,21 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
               onPress={toggleSelfView}
               accessibilityLabel="Partner video. Tap to swap views."
             >
-              <PartnerVideoPane compact />
+              <PartnerVideoPane
+                compact
+                voiceMode={Boolean(speedDateId)}
+                partnerConnected={partnerConnected}
+                connectionState={voiceConnectionState}
+              />
             </Pressable>
           </>
         ) : (
           <>
-            <PartnerVideoPane />
+            <PartnerVideoPane
+              voiceMode={Boolean(speedDateId)}
+              partnerConnected={partnerConnected}
+              connectionState={voiceConnectionState}
+            />
             <DraggableVideoPiP
               stageWidth={stageWidth}
               stageHeight={stageHeight}
@@ -276,22 +341,48 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
           )}
           <View style={styles.stageStatusChip}>
             <Ionicons
-              name={hasMediaAccess ? 'radio-outline' : 'alert-circle-outline'}
+              name={
+                speedDateId
+                  ? voiceConnectionState === 'connected' && partnerConnected
+                    ? 'radio'
+                    : voiceConnectionState === 'failed'
+                      ? 'alert-circle-outline'
+                      : 'radio-outline'
+                  : hasMediaAccess
+                    ? 'radio-outline'
+                    : 'alert-circle-outline'
+              }
               size={12}
-              color={hasMediaAccess ? colors.success : colors.sparkOrange}
+              color={
+                speedDateId
+                  ? voiceConnectionState === 'connected' && partnerConnected
+                    ? colors.success
+                    : voiceConnectionState === 'failed'
+                      ? colors.error
+                      : colors.sparkOrange
+                  : hasMediaAccess
+                    ? colors.success
+                    : colors.sparkOrange
+              }
             />
             <Text style={styles.stageStatusText}>
-              {hasMediaAccess ? 'Connected' : denied ? 'No access' : 'Waiting…'}
+              {speedDateId
+                ? voiceStatusLabel
+                : hasMediaAccess
+                  ? 'Mic ready'
+                  : denied
+                    ? 'No access'
+                    : 'Waiting…'}
             </Text>
           </View>
         </View>
 
         <View style={styles.stageControls}>
           <OverlayIcon
-            icon={isMuted ? 'mic-off' : 'mic'}
-            onPress={() => setIsMuted(!isMuted)}
-            active={isMuted}
-            label={isMuted ? 'Unmute' : 'Mute'}
+            icon={isVoiceMuted ? 'mic-off' : 'mic'}
+            onPress={toggleMute}
+            active={isVoiceMuted}
+            label={isVoiceMuted ? 'Unmute' : 'Mute'}
           />
           <OverlayIcon
             icon={isVideoOn ? 'videocam' : 'videocam-off'}
@@ -331,8 +422,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
         <View style={styles.confirmCard}>
           <Text style={styles.confirmTitle}>Report {partner.name}?</Text>
           <Text style={styles.confirmText}>
-            Thanks for letting us know. This date will end and our safety team will review (MVP
-            placeholder).
+            Thanks for letting us know. This date will end and our safety team will review.
           </Text>
           <View style={styles.confirmActions}>
             <Button title="Cancel" onPress={() => setShowReportConfirm(false)} variant="outline" size="sm" />
@@ -366,22 +456,51 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   );
 }
 
-function PartnerVideoPane({ compact = false }: { compact?: boolean }) {
+function PartnerVideoPane({
+  compact = false,
+  voiceMode = false,
+  partnerConnected = false,
+  connectionState = 'idle',
+}: {
+  compact?: boolean;
+  voiceMode?: boolean;
+  partnerConnected?: boolean;
+  connectionState?: string;
+}) {
+  const paneSub = voiceMode
+    ? partnerConnected
+      ? 'Voice connected'
+      : connectionState === 'connecting' || connectionState === 'reconnecting'
+        ? 'Connecting voice…'
+        : 'Waiting for date…'
+    : 'Live video';
+  const badgeText = voiceMode
+    ? partnerConnected
+      ? 'On call'
+      : 'Voice'
+    : compact
+      ? 'Date'
+      : 'Video feed';
+
   return (
     <View style={[compact ? styles.partnerPiPFeed : styles.mainFeed, styles.partnerFeed]}>
       <View style={styles.videoPaneGradient} />
       <View style={[styles.videoIconRing, compact && styles.videoIconRingSmall]}>
-        <Ionicons name="videocam" size={compact ? 22 : 40} color={colors.sparkOrange} />
+        <Ionicons
+          name={voiceMode ? 'mic' : 'videocam'}
+          size={compact ? 22 : 40}
+          color={colors.sparkOrange}
+        />
       </View>
       {!compact && (
         <>
           <Text style={styles.paneLabelLarge}>Your date</Text>
-          <Text style={styles.paneSub}>Live video</Text>
+          <Text style={styles.paneSub}>{paneSub}</Text>
         </>
       )}
       <View style={[styles.feedBadge, compact && styles.feedBadgeCompact]}>
-        <View style={styles.feedDot} />
-        <Text style={styles.feedBadgeText}>{compact ? 'Date' : 'Video feed'}</Text>
+        <View style={[styles.feedDot, voiceMode && partnerConnected && styles.feedDotLive]} />
+        <Text style={styles.feedBadgeText}>{badgeText}</Text>
       </View>
     </View>
   );
@@ -619,6 +738,9 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
+    backgroundColor: colors.textMuted,
+  },
+  feedDotLive: {
     backgroundColor: colors.success,
   },
   feedBadgeText: {

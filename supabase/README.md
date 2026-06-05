@@ -36,6 +36,11 @@ In the Supabase Dashboard, open **SQL Editor** and run **in order**:
 6. `supabase/migrations/006_auto_pairing.sql`
 7. `supabase/migrations/007_server_pairing.sql`
 8. `supabase/migrations/008_profile_photos_storage.sql`
+9. `supabase/migrations/009_account_safety.sql`
+10. `supabase/migrations/010_speed_date_calls.sql`
+
+See [docs/MODERATION.md](../docs/MODERATION.md) for report review and account status workflows.  
+See [docs/LIVEKIT_SETUP.md](../docs/LIVEKIT_SETUP.md) for voice call setup (LiveKit + Edge Functions).
 
 ## 4. Enable Realtime (queue + speed dates + feedback + messages)
 
@@ -217,6 +222,23 @@ Bucket: `profile-photos` (public read, per-user write folder `{userId}/{photoId}
 | Limits | JPEG/PNG/WebP, max 5 MB |
 
 After upload, restart or re-open the app — `fetchProfile` loads `profile_photos` into `UserProfile.photos`.
+
+## 13. Voice calls (LiveKit Phase 1)
+
+| Step | Action |
+|------|--------|
+| Migration | Run `010_speed_date_calls.sql` |
+| LiveKit | Create LiveKit Cloud project; set secrets on Supabase |
+| Deploy | `create-call-room`, `get-call-token` Edge Functions |
+| Test | Web: two browsers. Native: EAS dev build (not Expo Go) |
+
+Secrets (Supabase only — **not** in app `.env`):
+
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+- `LIVEKIT_URL` (e.g. `wss://your-project.livekit.cloud`)
+
+Full guide: **[docs/LIVEKIT_SETUP.md](../docs/LIVEKIT_SETUP.md)**
 
 ## Next backend steps
 

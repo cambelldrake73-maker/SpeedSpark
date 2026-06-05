@@ -9,17 +9,20 @@ import type {
 } from '../types';
 import { MOCK_CURRENT_USER, MOCK_PARTNER } from '../data/mockUsers';
 import {
-  blockUserInSupabase,
+  blockUserWithSafety,
   fetchBlockedUsers,
   fetchPreferences,
   fetchProfile,
+  isParticipationAllowedStatus,
   isSupabaseConfigured,
   markOnboardingComplete,
+  requestAccountDeletion,
   requireSupabase,
   savePreferencesFields,
   saveProfileFields,
   unblockUserInSupabase,
 } from '../services';
+import type { BlockUserOptions, AccountStatus } from '../types/safety';
 import { DEFAULT_MATCHING_PRIORITY_ORDER } from '../constants/matchingPriorities';
 import {
   isPreferencesComplete,
@@ -58,7 +61,7 @@ interface AppContextValue {
   markLoggedIn: () => void;
   login: () => void;
   logout: () => void;
-  deleteAccount: () => void;
+  deleteAccount: () => Promise<void>;
   syncFromSupabase: (userId: string) => Promise<SyncFromSupabaseResult>;
   saveProfileToServer: (profile: Partial<UserProfile>) => Promise<UserProfile>;
   savePreferencesToServer: (prefs: Partial<DatingPreferences>) => Promise<Partial<DatingPreferences>>;
@@ -68,7 +71,7 @@ interface AppContextValue {
   textNotificationsEnabled: boolean;
   setTextNotificationsEnabled: (enabled: boolean) => void;
   blockedUsers: BlockedUser[];
-  blockUser: (user: Pick<UserProfile, 'id' | 'name'>) => void;
+  blockUser: (user: Pick<UserProfile, 'id' | 'name'>, options?: BlockUserOptions) => void;
   unblockUser: (userId: string) => void;
   isBlocked: (userId: string) => boolean;
 }
@@ -276,12 +279,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       logSupabaseRequest(statusOp, { userId });
       const { data: profileRow, error: statusError } = await requireSupabase()
         .from('profiles')
-        .select('onboarded_at, text_notifications_enabled')
+        .select('onboarded_at, text_notifications_enabled, account_status')
         .eq('id', userId)
         .maybeSingle();
 
       if (statusError) {
         throwSupabaseError(statusOp, statusError);
+      }
+
+      const accountStatus =
+        ((profileRow as { account_status?: AccountStatus } | null)?.account_status ??
+          'active') as AccountStatus;
+      if (!isParticipationAllowedStatus(accountStatus)) {
+        throw new Error('This account is no longer active. Contact support if you need help.');
       }
 
       const onboarded = Boolean(
@@ -366,29 +376,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setBlockedUsers([]);
   }, []);
 
-  const deleteAccount = useCallback(() => {
-    logout();
-  }, [logout]);
-
-  const blockUser = useCallback((user: Pick<UserProfile, 'id' | 'name'>) => {
-    setBlockedUsers((prev) => {
-      if (prev.some((entry) => entry.userId === user.id)) {
-        return prev;
-      }
-      return [
-        ...prev,
-        {
-          userId: user.id,
-          name: user.name,
-          blockedAt: new Date().toISOString(),
-        },
-      ];
-    });
-
+  const deleteAccount = useCallback(async () => {
     if (isSupabaseConfigured && currentUser.id && currentUser.id !== 'user-1') {
-      void blockUserInSupabase(currentUser.id, user.id);
+      await requestAccountDeletion();
     }
-  }, [currentUser.id]);
+    logout();
+  }, [logout, currentUser.id]);
+
+  const blockUser = useCallback(
+    (user: Pick<UserProfile, 'id' | 'name'>, options?: BlockUserOptions) => {
+      setBlockedUsers((prev) => {
+        if (prev.some((entry) => entry.userId === user.id)) {
+          return prev;
+        }
+        return [
+          ...prev,
+          {
+            userId: user.id,
+            name: user.name,
+            blockedAt: new Date().toISOString(),
+          },
+        ];
+      });
+
+      if (isSupabaseConfigured && currentUser.id && currentUser.id !== 'user-1') {
+        void blockUserWithSafety(currentUser.id, user.id, {
+          speedDateId: options?.speedDateId,
+        }).catch((error) => {
+          logSupabaseError('blockUserWithSafety', error);
+        });
+      }
+    },
+    [currentUser.id],
+  );
 
   const unblockUser = useCallback((userId: string) => {
     setBlockedUsers((prev) => prev.filter((entry) => entry.userId !== userId));

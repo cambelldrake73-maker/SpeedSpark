@@ -1,0 +1,84 @@
+import { createClient } from 'npm:@supabase/supabase-js@2';
+import {
+  assertSpeedDateParticipant,
+  corsHeaders,
+  ensureCallRoom,
+  getAuthenticatedUser,
+  getLiveKitConfig,
+  jsonResponse,
+  markCallActive,
+  mintVoiceToken,
+} from '../_shared/callRoom.ts';
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  if (req.method !== 'POST') {
+    return jsonResponse({ error: 'Method not allowed' }, 405);
+  }
+
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const livekit = getLiveKitConfig();
+
+  if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+    return jsonResponse({ error: 'Server misconfigured' }, 500);
+  }
+  if (!livekit) {
+    return jsonResponse({ error: 'LiveKit is not configured' }, 500);
+  }
+
+  try {
+    const user = await getAuthenticatedUser(req, supabaseUrl, anonKey);
+    const body = await req.json();
+    const speedDateId = typeof body?.speedDateId === 'string' ? body.speedDateId : '';
+    if (!speedDateId) {
+      return jsonResponse({ error: 'speedDateId is required' }, 400);
+    }
+
+    const admin = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    await assertSpeedDateParticipant(admin, speedDateId, user.id);
+
+    const callRow = await ensureCallRoom(admin, livekit, speedDateId);
+
+    if (callRow.status === 'completed' || callRow.status === 'cancelled') {
+      return jsonResponse({ error: 'Call has ended' }, 410);
+    }
+
+    const { token, expiresAt } = mintVoiceToken(livekit, callRow.room_name, user.id);
+    await markCallActive(admin, speedDateId);
+
+    console.log('[get-call-token] issued', {
+      speedDateId,
+      roomName: callRow.room_name,
+      userId: user.id,
+      expiresAt,
+    });
+
+    return jsonResponse({
+      ok: true,
+      token,
+      roomName: callRow.room_name,
+      url: livekit.url,
+      expiresAt,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status =
+      message === 'Unauthorized'
+        ? 401
+        : message.startsWith('Forbidden')
+          ? 403
+          : message === 'Call has ended'
+            ? 410
+            : 400;
+    console.error('[get-call-token] failed', message);
+    return jsonResponse({ ok: false, error: message }, status);
+  }
+});

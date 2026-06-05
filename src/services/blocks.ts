@@ -86,32 +86,3 @@ export async function unblockUserInSupabase(
 
   console.log('[SpeedSpark Supabase] ✓ blocked_users.delete', { blockerId, blockedId });
 }
-
-export async function createReport(input: {
-  reporterId: string;
-  reportedId: string;
-  context: 'call' | 'messages' | 'profile';
-  speedDateId?: string;
-  notes?: string;
-}): Promise<void> {
-  const op = 'reports.insert';
-  logSupabaseRequest(op, {
-    reporterId: input.reporterId,
-    reportedId: input.reportedId,
-    context: input.context,
-  });
-
-  const { error } = await requireSupabase().from('reports').insert({
-    reporter_id: input.reporterId,
-    reported_id: input.reportedId,
-    context: input.context,
-    speed_date_id: input.speedDateId ?? null,
-    notes: input.notes ?? null,
-  });
-
-  if (error) {
-    throwSupabaseError(op, error);
-  }
-
-  console.log('[SpeedSpark Supabase] ✓ reports.insert');
-}

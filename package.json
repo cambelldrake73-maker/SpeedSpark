@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "^15.0.1",
     "@expo/vector-icons": "^15.0.2",
+    "@livekit/react-native": "^2.11.0",
+    "@livekit/react-native-expo-plugin": "^1.0.2",
+    "@livekit/react-native-webrtc": "^144.1.0",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/slider": "5.2.0",
     "@react-navigation/native": "^7.2.5",
@@ -11,10 +15,13 @@
     "@supabase/supabase-js": "^2.107.0",
     "expo": "~56.0.8",
     "expo-camera": "~56.0.7",
+    "expo-dev-client": "~56.0.18",
+    "expo-font": "~56.0.5",
     "expo-image-picker": "~56.0.15",
     "expo-linear-gradient": "~56.0.4",
     "expo-location": "~56.0.15",
     "expo-status-bar": "~56.0.4",
+    "livekit-client": "^2.19.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
@@ -28,6 +35,7 @@
   },
   "scripts": {
     "start": "expo start",
+    "start:dev": "expo start --dev-client",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"

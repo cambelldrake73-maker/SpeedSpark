@@ -1,6 +1,12 @@
 import { registerRootComponent } from 'expo';
+import { Platform } from 'react-native';
 
 import App from './App';
+
+if (Platform.OS !== 'web') {
+  const { registerGlobals } = require('@livekit/react-native');
+  registerGlobals();
+}
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

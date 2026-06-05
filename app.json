@@ -5,6 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "scheme": "speedspark",
     "userInterfaceStyle": "dark",
     "plugins": [
       [
@@ -27,12 +28,24 @@
           "microphonePermission": "SpeedSpark needs microphone access so your date can hear you.",
           "recordAudioAndroid": true
         }
-      ]
+      ],
+      [
+        "@livekit/react-native-expo-plugin",
+        {
+          "android": {
+            "audioType": "communication"
+          }
+        }
+      ],
+      "@config-plugins/react-native-webrtc",
+      "expo-font"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.speedspark.app"
     },
     "android": {
+      "package": "com.speedspark.app",
       "adaptiveIcon": {
         "backgroundColor": "#0F0F0F",
         "foregroundImage": "./assets/android-icon-foreground.png",

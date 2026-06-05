@@ -112,6 +112,9 @@ export async function joinQueue(userId: string, windowId: string): Promise<Queue
     throw new Error('Queue is only available when the account server is configured.');
   }
 
+  const { assertAccountCanParticipate } = await import('./accountSafety');
+  await assertAccountCanParticipate(userId);
+
   const existing = await getQueueStatus(userId, windowId);
   if (existing.entry?.status === 'waiting') {
     logQueueEvent('join', { userId, windowId, duplicate: true });

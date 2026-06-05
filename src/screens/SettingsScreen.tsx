@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, ScreenContainer, SettingsRow, SettingsSection, SettingsToggleRow } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
+import { formatAuthErrorForUser } from '../utils/authErrors';
 import type { SettingsScreenProps } from '../navigation/types';
 
 export function SettingsScreen({ navigation }: SettingsScreenProps) {
@@ -31,9 +32,17 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
     setShowDeleteConfirm(true);
   };
 
-  const confirmDelete = () => {
-    deleteAccount();
-    navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] });
+  const confirmDelete = async () => {
+    setShowDeleteConfirm(false);
+    try {
+      await deleteAccount();
+      if (isSupabaseEnabled) {
+        await signOut();
+      }
+      navigation.reset({ index: 0, routes: [{ name: 'Welcome' }] });
+    } catch (error) {
+      Alert.alert('Could not delete account', formatAuthErrorForUser(error));
+    }
   };
 
   return (

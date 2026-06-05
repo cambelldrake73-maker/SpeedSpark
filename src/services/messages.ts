@@ -175,6 +175,9 @@ export async function sendMessage(
     throw new Error('Message cannot be empty.');
   }
 
+  const { assertAccountCanParticipate } = await import('./accountSafety');
+  await assertAccountCanParticipate(userId);
+
   const match = await fetchMatchById(matchId, userId);
   if (!match) {
     throw new Error('You do not have access to this conversation.');

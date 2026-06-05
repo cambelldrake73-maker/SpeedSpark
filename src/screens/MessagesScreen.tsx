@@ -25,6 +25,7 @@ import { MOCK_MATCHES, MOCK_MESSAGES } from '../data/mockMessages';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useMessagesBackend } from '../hooks/useMessagesBackend';
+import { isSupabaseConfigured, reportUser } from '../services';
 import { formatAuthErrorForUser } from '../utils/authErrors';
 import type { Match, Message } from '../types';
 import type { MessagesScreenProps } from '../navigation/types';
@@ -129,6 +130,23 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
     setDraft('');
   };
 
+  const submitReport = async () => {
+    if (!activeMatch) return;
+    setShowFlagConfirm(false);
+    try {
+      if (isSupabaseConfigured && userId && userId !== 'user-1') {
+        await reportUser({
+          reporterId: userId,
+          reportedUserId: activeMatch.user.id,
+          context: 'messages',
+        });
+      }
+      setActionNotice('Report sent. Thanks for helping keep SpeedSpark safe.');
+    } catch (error) {
+      setActionNotice(formatAuthErrorForUser(error));
+    }
+  };
+
   const handleFlag = () => {
     setShowChatMenu(false);
     if (Platform.OS === 'web') {
@@ -137,21 +155,20 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
     }
     Alert.alert(
       'Report this match?',
-      'Tell us if something felt unsafe or off. Our safety team will review (MVP placeholder).',
+      'Tell us if something felt unsafe or off. Our safety team will review.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Send report',
           style: 'destructive',
-          onPress: () => setActionNotice('Report sent. Thanks for helping keep SpeedSpark safe.'),
+          onPress: () => void submitReport(),
         },
       ],
     );
   };
 
   const confirmFlag = () => {
-    setShowFlagConfirm(false);
-    setActionNotice('Report sent. Thanks for helping keep SpeedSpark safe.');
+    void submitReport();
   };
 
   const handleUnmatch = () => {
