@@ -24,23 +24,22 @@ Restart Expo after changing env vars:
 npm start
 ```
 
-## 3. Run the database migration
+## 3. Run the database migrations
 
-In the Supabase Dashboard, open **SQL Editor** and paste the contents of:
+In the Supabase Dashboard, open **SQL Editor** and run **in order**:
 
-`supabase/migrations/001_initial_schema.sql`
+1. `supabase/migrations/001_initial_schema.sql`
+2. `supabase/migrations/002_matching_queue_rpc.sql`
 
-Click **Run**. This creates:
+## 4. Enable Realtime (queue + speed dates)
 
-- `profiles`, `profile_photos`, `dating_preferences`
-- `speed_date_windows`, `queue_entries`, `speed_dates`
-- `date_feedback`, `matches`, `messages`
-- `blocked_users`, `reports`
-- Row Level Security policies
-- `profile-photos` storage bucket
-- Trigger to create a profile row when a user signs up
+In **Database → Replication**, enable Realtime for:
 
-## 4. Auth settings (recommended)
+- `queue_entries`
+- `speed_dates`
+- `matches` (optional, for future messaging)
+
+## 5. Auth settings (recommended)
 
 In **Authentication → Providers → Email**:
 
@@ -49,7 +48,7 @@ In **Authentication → Providers → Email**:
 
 Phone OTP can be added later (requires SMS provider).
 
-## 5. What works today
+## 6. What works today
 
 | Feature | With `.env` configured |
 |--------|-------------------------|
@@ -57,11 +56,32 @@ Phone OTP can be added later (requires SMS provider).
 | Email log in | Session persisted (web + native) |
 | Profile onboarding save | Writes to `profiles` + `dating_preferences` |
 | Block / unblock | Syncs to `blocked_users` |
+| Lobby queue join/leave | Writes to `queue_entries` |
+| Queue counts (live window) | Read from `queue_entries` |
+| Dev pairing engine | `apply_queue_pair` RPC + `pairingEngine.ts` |
 | Phone sign up / OTP | Still uses demo flow (mock) |
 
 Without `.env`, the app runs in **full demo mode** with mock data.
 
-## 6. Optional: Supabase CLI
+## 7. Testing queue & matching (dev)
+
+After two test users have signed up and completed onboarding:
+
+1. Run migration `002_matching_queue_rpc.sql`.
+2. In Metro, open the dev console and run:
+
+```js
+await globalThis.SpeedSparkMatchingDev.seedDevLiveWindow()
+// copy the returned window id
+await globalThis.SpeedSparkMatchingDev.simulateQueuePopulation('WINDOW_ID', ['USER_A_UUID', 'USER_B_UUID'])
+await globalThis.SpeedSparkMatchingDev.runDevPairing('WINDOW_ID')
+await globalThis.SpeedSparkMatchingDev.printDevQueueReport('WINDOW_ID')
+```
+
+3. In the app lobby (with Supabase configured), **Join queue** writes a `queue_entries` row (`status: waiting`).
+4. Confirm in **Table Editor** → `queue_entries` and `speed_dates` after pairing.
+
+## 8. Optional: Supabase CLI
 
 ```bash
 brew install supabase/tap/supabase
@@ -70,9 +90,22 @@ supabase link --project-ref your-project-ref
 supabase db push
 ```
 
+## Backend service map
+
+| Service | Responsibility |
+|---------|----------------|
+| `queueService.ts` | join, leave, status, counts |
+| `matchingService.ts` | compatibility score + filters |
+| `matchingData.ts` | load profiles/prefs for waiting users |
+| `pairingEngine.ts` | greedy pairing + RPC apply |
+| `speedDates.ts` | active speed date reads + RPC |
+| `windows.ts` | speed date windows CRUD/read |
+| `realtimeSubscriptions.ts` | queue + speed date + match channels |
+| `dev/matchingDev.ts` | seed window, simulate queue, run pairing |
+
 ## Next backend steps
 
+- Wire `subscribeToSpeedDatesForUser` into queue UI when paired
 - Photo upload to `profile-photos` bucket
 - Real-time messages subscription
-- Queue pairing for speed dates
 - Phone auth via Supabase + Twilio

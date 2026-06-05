@@ -16,6 +16,9 @@ import { MOCK_SPEED_DATE_WINDOWS } from '../data/mockSpeedDates';
 import { MOCK_MATCHES } from '../data/mockMessages';
 import { MOCK_PARTNER } from '../data/mockUsers';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { useLobbyBackend } from '../hooks/useLobbyBackend';
+import { useSpeedDatePairDetection } from '../hooks/useSpeedDatePairDetection';
 import type { SpeedDateWindow } from '../types';
 import type { SpeedDateLobbyScreenProps } from '../navigation/types';
 
@@ -26,12 +29,14 @@ export function SpeedDateLobbyScreen({ navigation }: SpeedDateLobbyScreenProps) 
     isOnboarded,
     setCurrentDatePartner,
   } = useApp();
+  const { session } = useAuth();
+  const lobby = useLobbyBackend(session?.user?.id ?? currentUser.id);
   const [queueStatus, setQueueStatus] = useState<QueueStatus>('idle');
   const [searchSeconds, setSearchSeconds] = useState(0);
   const [reminderWindowIds, setReminderWindowIds] = useState<Set<string>>(new Set());
 
-  const liveWindow = MOCK_SPEED_DATE_WINDOWS.find((w) => w.isLive);
-  const upcomingWindows = MOCK_SPEED_DATE_WINDOWS.filter((w) => !w.isLive);
+  const liveWindow = lobby.liveWindow;
+  const upcomingWindows = lobby.upcomingWindows;
 
   const queueLabel = queueStatus === 'idle' ? 'Open' : 'Pairing';
 
@@ -51,6 +56,11 @@ export function SpeedDateLobbyScreen({ navigation }: SpeedDateLobbyScreenProps) 
     if (queueStatus !== 'searching') return;
 
     const tick = setInterval(() => setSearchSeconds((s) => s + 1), 1000);
+
+    if (lobby.useBackend) {
+      return () => clearInterval(tick);
+    }
+
     const matchTimer = setTimeout(() => {
       setCurrentDatePartner(MOCK_PARTNER);
       setQueueStatus('idle');
@@ -62,13 +72,24 @@ export function SpeedDateLobbyScreen({ navigation }: SpeedDateLobbyScreenProps) 
       clearInterval(tick);
       clearTimeout(matchTimer);
     };
-  }, [queueStatus, navigation, setCurrentDatePartner]);
+  }, [queueStatus, navigation, setCurrentDatePartner, lobby.useBackend]);
+
+  useSpeedDatePairDetection({
+    userId: session?.user?.id ?? currentUser.id,
+    enabled: lobby.useBackend && queueStatus === 'searching',
+    onPaired: ({ partner, speedDateId }) => {
+      setCurrentDatePartner(partner);
+      setQueueStatus('idle');
+      setSearchSeconds(0);
+      navigation.navigate('ActiveDate', { partner, speedDateId });
+    },
+  });
 
   const handleVerifyIdentity = () => {
     navigation.navigate('Verification', { context: 'window' });
   };
 
-  const handleJoinQueue = () => {
+  const handleJoinQueue = async () => {
     if (!isOnboarded) {
       navigation.replace('ProfileCreation');
       return;
@@ -77,11 +98,22 @@ export function SpeedDateLobbyScreen({ navigation }: SpeedDateLobbyScreenProps) 
       handleVerifyIdentity();
       return;
     }
+    if (lobby.useBackend) {
+      const joined = await lobby.joinQueue();
+      if (joined) {
+        setQueueStatus('searching');
+        setSearchSeconds(0);
+      }
+      return;
+    }
     setQueueStatus('searching');
     setSearchSeconds(0);
   };
 
-  const handleLeaveQueue = () => {
+  const handleLeaveQueue = async () => {
+    if (lobby.useBackend) {
+      await lobby.leaveQueue();
+    }
     setQueueStatus('idle');
     setSearchSeconds(0);
   };
@@ -139,8 +171,11 @@ export function SpeedDateLobbyScreen({ navigation }: SpeedDateLobbyScreenProps) 
             {formatWindowTime(liveWindow.startTime)} – {formatWindowTime(liveWindow.endTime)}
           </Text>
           <Text style={styles.queueMeta}>
-            {liveWindow.queueCount ?? 0} people in queue nearby · 5 min per date
+            {lobby.waitingCount} people in queue nearby · 5 min per date
           </Text>
+          {lobby.error ? (
+            <Text style={styles.backendError}>{lobby.error}</Text>
+          ) : null}
 
           <View style={styles.queueArea}>
             <QueueStatusPanel
@@ -295,6 +330,11 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '500',
     marginBottom: spacing.md,
+  },
+  backendError: {
+    ...typography.caption,
+    color: colors.error,
+    marginBottom: spacing.sm,
   },
   queueArea: {
     borderTopWidth: 1,

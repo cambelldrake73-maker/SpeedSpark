@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -16,15 +16,17 @@ import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { DATE_DURATION_SECONDS } from '../data/mockSpeedDates';
 import { useMediaAccess } from '../hooks/useMediaAccess';
 import { useApp } from '../context/AppContext';
+import { updateSpeedDateStatus } from '../services';
 import type { ActiveDateScreenProps } from '../navigation/types';
 
 const ZOOM_LEVELS = [0, 0.12, 0.24, 0.36];
 const PIP_MARGIN = 12;
 
 export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
-  const { partner } = route.params;
-  const { blockUser } = useApp();
+  const { partner, speedDateId } = route.params;
+  const { blockUser, setCurrentDatePartner } = useApp();
   const [secondsLeft, setSecondsLeft] = useState(DATE_DURATION_SECONDS);
+  const hasEndedRef = useRef(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
@@ -44,36 +46,50 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   const { stageWidth, stageHeight, onStageLayout } = usePiPStageLayout();
 
   useEffect(() => {
+    setCurrentDatePartner(partner);
+  }, [partner, setCurrentDatePartner]);
+
+  useEffect(() => {
     if (!selfExpanded) {
       setShowSelfSettings(false);
     }
   }, [selfExpanded]);
 
+  const goToFeedback = useCallback(() => {
+    if (hasEndedRef.current) {
+      return;
+    }
+    hasEndedRef.current = true;
+
+    const dateId = speedDateId ?? `date-${Date.now()}`;
+
+    if (speedDateId) {
+      void updateSpeedDateStatus(speedDateId, 'completed').catch((error) => {
+        console.log('[SpeedSpark Pair] Failed to mark speed date completed', error);
+      });
+    }
+
+    navigation.replace('PostDateFeedback', {
+      partnerId: partner.id,
+      dateId,
+    });
+  }, [navigation, partner.id, speedDateId]);
+
   useEffect(() => {
     if (secondsLeft <= 0) {
-      navigation.replace('PostDateFeedback', {
-        partnerId: partner.id,
-        dateId: `date-${Date.now()}`,
-      });
+      goToFeedback();
       return;
     }
 
     const timer = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearTimeout(timer);
-  }, [secondsLeft, navigation, partner.id]);
+  }, [secondsLeft, goToFeedback]);
 
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = secondsLeft % 60;
   const progress = 1 - secondsLeft / DATE_DURATION_SECONDS;
   const isUrgent = secondsLeft <= 30;
   const zoom = ZOOM_LEVELS[zoomIndex];
-
-  const goToFeedback = () => {
-    navigation.replace('PostDateFeedback', {
-      partnerId: partner.id,
-      dateId: `date-${Date.now()}`,
-    });
-  };
 
   const handleEndEarly = () => {
     if (Platform.OS === 'web') {

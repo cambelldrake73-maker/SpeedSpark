@@ -4,10 +4,15 @@ import { QueueStatusPanel, ScreenContainer } from '../components';
 import { colors, spacing, typography } from '../constants/theme';
 import { MOCK_PARTNER } from '../data/mockUsers';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { useSpeedDatePairDetection } from '../hooks/useSpeedDatePairDetection';
+import { isSupabaseConfigured } from '../services/supabaseEnv';
 import type { DateQueueScreenProps } from '../navigation/types';
 
 export function DateQueueScreen({ navigation }: DateQueueScreenProps) {
-  const { isOnboarded, windowIdentityVerified, setCurrentDatePartner } = useApp();
+  const { currentUser, isOnboarded, windowIdentityVerified, setCurrentDatePartner } = useApp();
+  const { session } = useAuth();
+  const useBackend = isSupabaseConfigured && Boolean(session?.user?.id ?? currentUser.id);
   const [searchSeconds, setSearchSeconds] = useState(0);
   const [started, setStarted] = useState(false);
 
@@ -29,6 +34,11 @@ export function DateQueueScreen({ navigation }: DateQueueScreenProps) {
     if (!started) return;
 
     const tick = setInterval(() => setSearchSeconds((s) => s + 1), 1000);
+
+    if (useBackend) {
+      return () => clearInterval(tick);
+    }
+
     const matchTimer = setTimeout(() => {
       setCurrentDatePartner(MOCK_PARTNER);
       navigation.replace('ActiveDate', { partner: MOCK_PARTNER });
@@ -38,7 +48,16 @@ export function DateQueueScreen({ navigation }: DateQueueScreenProps) {
       clearInterval(tick);
       clearTimeout(matchTimer);
     };
-  }, [started, navigation, setCurrentDatePartner]);
+  }, [started, navigation, setCurrentDatePartner, useBackend]);
+
+  useSpeedDatePairDetection({
+    userId: session?.user?.id ?? currentUser.id,
+    enabled: useBackend && started,
+    onPaired: ({ partner, speedDateId }) => {
+      setCurrentDatePartner(partner);
+      navigation.replace('ActiveDate', { partner, speedDateId });
+    },
+  });
 
   const handleLeaveQueue = () => {
     navigation.replace('SpeedDateLobby');

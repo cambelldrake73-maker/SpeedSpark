@@ -20,7 +20,7 @@ export type RootStackParamList = {
   BlockedUsers: undefined;
   LegalDocument: { documentId: LegalDocumentId };
   DateQueue: undefined;
-  ActiveDate: { partner: UserProfile };
+  ActiveDate: { partner: UserProfile; speedDateId?: string };
   PostDateFeedback: { partnerId: string; dateId: string };
   MatchResult: { partnerId: string; dateId: string };
   Messages: { matchId?: string };
