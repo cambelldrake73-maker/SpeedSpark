@@ -1,4 +1,32 @@
-import { Platform, ViewStyle } from 'react-native';
+import { Platform, TextStyle, ViewStyle } from 'react-native';
+
+const TEXT_INPUT_FONT_SIZE = 16;
+
+/** TextInput metrics without lineHeight — lineHeight misaligns typed text on iOS. */
+export function textInputMetrics(overrides?: TextStyle): TextStyle {
+  const base: TextStyle = {
+    fontSize: TEXT_INPUT_FONT_SIZE,
+    fontWeight: '400',
+    minHeight: 48,
+    paddingTop: Platform.OS === 'ios' ? 13 : 10,
+    paddingBottom: Platform.OS === 'ios' ? 13 : 10,
+    ...(Platform.OS === 'android'
+      ? { textAlignVertical: 'center' as const, includeFontPadding: false }
+      : {}),
+  };
+
+  if (!overrides) {
+    return base;
+  }
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) {
+      (base as Record<string, unknown>)[key] = value;
+    }
+  }
+
+  return base;
+}
 
 /** Cross-platform card shadow */
 export function cardShadow(intensity: 'sm' | 'md' = 'md'): ViewStyle {

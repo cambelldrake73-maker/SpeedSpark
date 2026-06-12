@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Platform } from 'react-native';
 import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { openAppSettings, promptOpenAppSettings } from '../utils/openAppSettings';
 
 type MediaAccessState = {
   granted: boolean;
@@ -8,6 +9,7 @@ type MediaAccessState = {
   denied: boolean;
   errorMessage: string | null;
   requestAccess: () => Promise<void>;
+  openSettings: () => void;
 };
 
 /**
@@ -30,6 +32,13 @@ export function useMediaAccess(): MediaAccessState {
     Platform.OS === 'web'
       ? !webGranted && webError != null
       : !nativePending && !nativeGranted;
+
+  const promptMediaSettings = useCallback(() => {
+    promptOpenAppSettings(
+      'Camera & microphone needed',
+      'Allow camera and microphone access in Settings for your date.',
+    );
+  }, []);
 
   const requestWebAccess = useCallback(async () => {
     setRequesting(true);
@@ -63,27 +72,31 @@ export function useMediaAccess(): MediaAccessState {
     }
   }, []);
 
-  const requestNativeAccess = useCallback(async () => {
+  const requestNativeAccess = useCallback(async (promptSettingsOnDeny = false) => {
     setRequesting(true);
     try {
-      await requestCameraPermission();
-      await requestMicPermission();
+      const cam = await requestCameraPermission();
+      const mic = await requestMicPermission();
+
+      if (promptSettingsOnDeny && (cam?.granted !== true || mic?.granted !== true)) {
+        promptMediaSettings();
+      }
     } finally {
       setRequesting(false);
     }
-  }, [requestCameraPermission, requestMicPermission]);
+  }, [promptMediaSettings, requestCameraPermission, requestMicPermission]);
 
   const requestAccess = useCallback(async () => {
     if (Platform.OS === 'web') {
       await requestWebAccess();
       return;
     }
-    await requestNativeAccess();
+    await requestNativeAccess(true);
   }, [requestNativeAccess, requestWebAccess]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
-      void requestNativeAccess();
+      void requestNativeAccess(false);
     }
   }, [requestNativeAccess]);
 
@@ -93,5 +106,6 @@ export function useMediaAccess(): MediaAccessState {
     denied,
     errorMessage: webError,
     requestAccess,
+    openSettings: openAppSettings,
   };
 }

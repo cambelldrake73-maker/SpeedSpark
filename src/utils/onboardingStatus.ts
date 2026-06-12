@@ -1,32 +1,38 @@
 import type { DatingPreferences, UserProfile } from '../types';
 
-/** Profile fields required before preferences (photos optional for now). */
-export function isProfileComplete(profile: Partial<UserProfile>): boolean {
+/** Core profile fields saved to the account (used to resume onboarding vs. restart). */
+export function hasSavedProfileBasics(profile: Partial<UserProfile>): boolean {
   const name = profile.name?.trim() ?? '';
   const age = profile.age ?? 0;
   const location = profile.location?.trim() ?? '';
   const height = profile.heightInches ?? 0;
-  const lookingFor = profile.lookingFor ?? [];
-
   return (
     name.length > 0 &&
     age >= 18 &&
     location.length > 0 &&
     height > 0 &&
-    lookingFor.length > 0 &&
-    Boolean(profile.genderIdentity) &&
-    Boolean(profile.sexualOrientation)
+    Boolean(profile.genderIdentity)
   );
 }
 
-/** User has filled in match preferences beyond DB defaults. */
-export function isPreferencesComplete(prefs: Partial<DatingPreferences>): boolean {
-  const hasLookingFor = (prefs.preferredLookingFor?.length ?? 0) > 0;
-  const hasOrientations = (prefs.preferredOrientations?.length ?? 0) > 0;
-  const hasDealbreakers = (prefs.dealbreakers?.length ?? 0) > 0;
-  const hasNiceToHaves = (prefs.niceToHaves?.length ?? 0) > 0;
+/** Profile fields required before preferences (photos optional for now). */
+export function isProfileComplete(profile: Partial<UserProfile>): boolean {
+  return (
+    hasSavedProfileBasics(profile) && (profile.datingIntentions?.length ?? 0) > 0
+  );
+}
 
-  return hasLookingFor || hasOrientations || hasDealbreakers || hasNiceToHaves;
+/** User has filled in required match preferences. */
+export function isPreferencesComplete(prefs: Partial<DatingPreferences>): boolean {
+  return (prefs.preferredLookingFor?.length ?? 0) > 0;
+}
+
+/** Returning login — profile + prefs already on the account. */
+export function isReturningAccountReady(
+  profile: Partial<UserProfile>,
+  prefs: Partial<DatingPreferences>,
+): boolean {
+  return hasSavedProfileBasics(profile) && isPreferencesComplete(prefs);
 }
 
 export type OnboardingRoute =
@@ -40,14 +46,17 @@ export function resolveOnboardingRoute(input: {
   profile: Partial<UserProfile>;
   preferences: Partial<DatingPreferences>;
 }): OnboardingRoute {
-  if (input.isOnboarded) {
+  if (input.isOnboarded || isReturningAccountReady(input.profile, input.preferences)) {
     return 'SpeedDateLobby';
   }
-  if (!isProfileComplete(input.profile)) {
+  if (!hasSavedProfileBasics(input.profile)) {
     return 'ProfileCreation';
   }
   if (!isPreferencesComplete(input.preferences)) {
     return 'Preferences';
+  }
+  if (!isProfileComplete(input.profile)) {
+    return 'ProfileCreation';
   }
   return 'Verification';
 }

@@ -4,26 +4,25 @@ import { ProgressBar } from './ProgressBar';
 import { colors, spacing, typography } from '../constants/theme';
 
 interface OnboardingStepProps {
-  flowLabel: string;
   currentStep: number;
   totalSteps: number;
   title: string;
-  subtitle: string;
+  subtitle?: string;
+  dense?: boolean;
 }
 
 export function OnboardingStep({
-  flowLabel,
   currentStep,
   totalSteps,
   title,
   subtitle,
+  dense = false,
 }: OnboardingStepProps) {
   return (
-    <View style={styles.container}>
-      <Text style={styles.flow}>{flowLabel}</Text>
-      <ProgressBar currentStep={currentStep} totalSteps={totalSteps} label="Onboarding" />
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{subtitle}</Text>
+    <View style={[styles.container, dense && styles.denseContainer]}>
+      <ProgressBar currentStep={currentStep} totalSteps={totalSteps} dense={dense} />
+      <Text style={[styles.title, dense && styles.denseTitle]}>{title}</Text>
+      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
     </View>
   );
 }
@@ -32,18 +31,16 @@ const styles = StyleSheet.create({
   container: {
     marginBottom: spacing.md,
   },
-  flow: {
-    ...typography.caption,
-    color: colors.primary,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+  denseContainer: {
     marginBottom: spacing.sm,
-    textTransform: 'uppercase',
   },
   title: {
     ...typography.title,
     color: colors.text,
     marginBottom: spacing.sm,
+  },
+  denseTitle: {
+    marginBottom: spacing.xs,
   },
   subtitle: {
     ...typography.body,

@@ -7,6 +7,8 @@ interface TagSelectorProps<T extends string> {
   selected: T[];
   onToggle: (value: T) => void;
   multiSelect?: boolean;
+  /** Hides option descriptions to keep one screen per wizard step. */
+  compact?: boolean;
 }
 
 export function TagSelector<T extends string>({
@@ -14,6 +16,7 @@ export function TagSelector<T extends string>({
   selected,
   onToggle,
   multiSelect = true,
+  compact = false,
 }: TagSelectorProps<T>) {
   const handlePress = (value: T) => {
     if (!multiSelect) {
@@ -36,11 +39,11 @@ export function TagSelector<T extends string>({
             <Text style={[styles.tagText, isSelected && styles.tagTextSelected]}>
               {option.label}
             </Text>
-            {option.description && (
+            {!compact && option.description ? (
               <Text style={[styles.description, isSelected && styles.descriptionSelected]}>
                 {option.description}
               </Text>
-            )}
+            ) : null}
           </Pressable>
         );
       })}

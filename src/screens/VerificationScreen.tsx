@@ -1,11 +1,17 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, FormErrorBanner, OnboardingStep, ScreenContainer } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
+import {
+  ONBOARDING_TOTAL_STEPS,
+  ONBOARDING_VERIFY_STEP,
+} from '../constants/onboardingProgress';
 import { useApp } from '../context/AppContext';
 import { formatAuthErrorForUser } from '../utils/authErrors';
 import type { VerificationScreenProps } from '../navigation/types';
+
+const USE_STATIC_VERIFY_LAYOUT = Platform.OS === 'ios' || Platform.OS === 'android';
 
 export function VerificationScreen({ navigation, route }: VerificationScreenProps) {
   const { completeOnboarding, verifyForWindow } = useApp();
@@ -32,82 +38,98 @@ export function VerificationScreen({ navigation, route }: VerificationScreenProp
     }
   };
 
+  const compact = USE_STATIC_VERIFY_LAYOUT;
+
   return (
-    <ScreenContainer scroll contentStyle={styles.content}>
-      <OnboardingStep
-        flowLabel={isWindowCheck ? 'Before you join' : 'Step 3 of 3'}
-        currentStep={isWindowCheck ? 1 : 3}
-        totalSteps={isWindowCheck ? 1 : 3}
-        title={isWindowCheck ? 'Safety check' : 'Verify your identity'}
-        subtitle={
-          isWindowCheck
-            ? 'Before each live window, we confirm you match your profile photos. It is mainly about safety — so everyone on a video date is who they say they are.'
-            : 'Verified profiles help keep the community safe. Real verification ships soon — for now, you can explore the full demo flow.'
-        }
-      />
-
-      <View style={styles.iconContainer}>
-        <View style={styles.iconCircle}>
-          <Ionicons name="shield-checkmark" size={48} color={colors.primary} />
+    <ScreenContainer
+      scroll={!USE_STATIC_VERIFY_LAYOUT}
+      scrollToTopOnFocus={!isWindowCheck && !USE_STATIC_VERIFY_LAYOUT}
+      contentStyle={USE_STATIC_VERIFY_LAYOUT ? styles.contentStatic : styles.content}
+    >
+      {isWindowCheck ? (
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Safety check</Text>
         </View>
-      </View>
-
-      <View style={styles.placeholder}>
-        <Ionicons name="camera-outline" size={32} color={colors.textMuted} />
-        <Text style={styles.placeholderTitle}>
-          {isWindowCheck ? 'Live selfie safety check' : 'Verification coming soon'}
-        </Text>
-        <Text style={styles.placeholderText}>
-          {isWindowCheck
-            ? 'Take a quick live selfie matched to your profile photos. Until the real check ships, continue with a demo pass for this window.'
-            : "You'll take a quick live selfie matched to your profile photos. Until then, continue with a placeholder verified badge for demo purposes."}
-        </Text>
-      </View>
-
-      <View style={styles.steps}>
-        <StepItem number={1} text="Take a live selfie in good lighting" />
-        <StepItem number={2} text="We confirm it matches your profile photos" />
-        <StepItem
-          number={3}
-          text={
-            isWindowCheck
-              ? 'Join the queue — you are cleared for this window'
-              : 'Earn a verified badge others can trust for safety'
-          }
-        />
-      </View>
-
-      <View style={styles.trustBox}>
-        <Text style={styles.trustText}>
-          {isWindowCheck
-            ? 'Your selfie is only used for safety — to confirm you are the person in your photos before a live video date.'
-            : "SpeedSpark never sells your verification data. It's only used to keep the community safe."}
-        </Text>
-      </View>
-
-      <FormErrorBanner messages={saveError ? [saveError] : []} />
-      <Button
-        title={isWindowCheck ? 'Complete check & return to lobby' : 'Enter the lobby (demo)'}
-        onPress={handleContinue}
-        size="lg"
-        loading={isSaving}
-        disabled={isSaving}
-      />
-      {!isWindowCheck && (
-        <Button
-          title="Start verification (placeholder)"
-          onPress={handleContinue}
-          variant="outline"
-          disabled
-          style={styles.secondaryBtn}
+      ) : (
+        <OnboardingStep
+          currentStep={ONBOARDING_VERIFY_STEP}
+          totalSteps={ONBOARDING_TOTAL_STEPS}
+          title="Verify your identity"
+          dense={compact}
         />
       )}
-      <Button
-        title="Back"
-        onPress={() => navigation.goBack()}
-        variant="ghost"
-        disabled={isSaving}
-      />
+
+      <View style={USE_STATIC_VERIFY_LAYOUT ? styles.main : undefined}>
+        <View style={[styles.iconContainer, compact && styles.iconContainerCompact]}>
+          <View style={[styles.iconCircle, compact && styles.iconCircleCompact]}>
+            <Ionicons
+              name="shield-checkmark"
+              size={compact ? 40 : 48}
+              color={colors.primary}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.placeholder, compact && styles.placeholderCompact]}>
+          <Ionicons name="camera-outline" size={compact ? 28 : 32} color={colors.textMuted} />
+          <Text style={styles.placeholderTitle}>
+            {isWindowCheck ? 'Live selfie safety check' : 'Verification coming soon'}
+          </Text>
+          <Text style={styles.placeholderText}>
+            {isWindowCheck
+              ? 'Take a quick live selfie matched to your profile photos.'
+              : "You'll take a quick live selfie matched to your profile photos. Until then, continue with a placeholder verified badge for demo purposes."}
+          </Text>
+        </View>
+
+        <View style={[styles.steps, compact && styles.stepsCompact]}>
+          <StepItem number={1} text="Take a live selfie in good lighting" />
+          <StepItem number={2} text="We confirm it matches your profile photos" />
+          <StepItem
+            number={3}
+            text={
+              isWindowCheck
+                ? 'Join the queue — you are cleared for this window'
+                : 'Earn a verified badge others can trust for safety'
+            }
+          />
+        </View>
+
+        {!isWindowCheck && !USE_STATIC_VERIFY_LAYOUT ? (
+          <View style={styles.trustBox}>
+            <Text style={styles.trustText}>
+              SpeedSpark never sells your verification data. It's only used to keep the community
+              safe.
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={USE_STATIC_VERIFY_LAYOUT ? styles.footer : undefined}>
+        <FormErrorBanner messages={saveError ? [saveError] : []} />
+        <Button
+          title={isWindowCheck ? 'Complete check & return to lobby' : 'Enter the lobby (demo)'}
+          onPress={handleContinue}
+          size="lg"
+          loading={isSaving}
+          disabled={isSaving}
+        />
+        {!isWindowCheck && !USE_STATIC_VERIFY_LAYOUT && (
+          <Button
+            title="Start verification (placeholder)"
+            onPress={handleContinue}
+            variant="outline"
+            disabled
+            style={styles.secondaryBtn}
+          />
+        )}
+        <Button
+          title="Back"
+          onPress={() => navigation.goBack()}
+          variant="ghost"
+          disabled={isSaving}
+        />
+      </View>
     </ScreenContainer>
   );
 }
@@ -128,9 +150,32 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
+  contentStatic: {
+    flex: 1,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+  },
+  main: {
+    flex: 1,
+    minHeight: 0,
+  },
+  footer: {
+    marginTop: 'auto',
+  },
+  header: {
+    marginBottom: spacing.md,
+  },
+  headerTitle: {
+    ...typography.title,
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
   iconContainer: {
     alignItems: 'center',
     marginVertical: spacing.lg,
+  },
+  iconContainerCompact: {
+    marginVertical: spacing.sm,
   },
   iconCircle: {
     width: 96,
@@ -139,6 +184,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  iconCircleCompact: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
   },
   placeholder: {
     backgroundColor: colors.surface,
@@ -149,6 +199,10 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     alignItems: 'center',
     marginBottom: spacing.lg,
+  },
+  placeholderCompact: {
+    padding: spacing.md,
+    marginBottom: spacing.sm,
   },
   placeholderTitle: {
     ...typography.subtitle,
@@ -165,6 +219,10 @@ const styles = StyleSheet.create({
   steps: {
     gap: spacing.md,
     marginBottom: spacing.lg,
+  },
+  stepsCompact: {
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   stepItem: {
     flexDirection: 'row',

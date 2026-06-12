@@ -1,7 +1,4 @@
-/**
- * Development-only helpers for queue / matching / pairing.
- * Call from Metro console or temporary __DEV__ buttons — not for production UI.
- */
+import { runMatchingFrameworkTests } from './matchingFrameworkTests';
 import { logBackendInfo } from '../backendLogger';
 import { fetchBlockedUserIds } from '../blocksRead';
 import { fetchAppearanceFitScores } from '../matchingAppearance';
@@ -144,6 +141,8 @@ export async function compareDevMatchScores(userAId: string, userBId: string) {
   return report;
 }
 
+export { runMatchingFrameworkTests } from './matchingFrameworkTests';
+
 if (__DEV__) {
   (globalThis as Record<string, unknown>).SpeedSparkMatchingDev = {
     seedDevLiveWindow,
@@ -151,5 +150,6 @@ if (__DEV__) {
     runDevPairing,
     printDevQueueReport,
     compareDevMatchScores,
+    runMatchingFrameworkTests,
   };
 }

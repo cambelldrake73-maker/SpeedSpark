@@ -1,4 +1,5 @@
 import { normalizeMatchingPriorityOrder } from '../constants/matchingPriorities';
+import { normalizeLifestyleTags, normalizePresentationTags } from '../constants/options';
 import type {
   DatingPreferences,
   GenderIdentity,
@@ -27,11 +28,12 @@ function mapProfileRow(row: ProfileRow, photos: string[] = []): UserProfile {
     photos,
     genderIdentity: row.gender_identity as GenderIdentity,
     sexualOrientation: row.sexual_orientation as SexualOrientation,
-    lookingFor: row.looking_for as LookingFor[],
+    datingIntentions: (row.dating_intentions ?? []) as LookingFor[],
+    interestedInGenders: row.looking_for as GenderIdentity[],
     queerRoles: row.queer_roles as QueerRole[],
-    presentationTags: row.presentation_tags as PresentationTag[],
-    personalityTags: row.personality_tags,
-    lifestyleTags: row.lifestyle_tags,
+    presentationTags: normalizePresentationTags(row.presentation_tags),
+    personalityTags: [],
+    lifestyleTags: normalizeLifestyleTags(row.lifestyle_tags, row.personality_tags),
     verificationStatus: row.verification_status as VerificationStatus,
   };
 }
@@ -44,11 +46,9 @@ function mapPreferencesRow(row: DatingPreferencesRow): Partial<DatingPreferences
     heightMaxInches: row.height_max_inches,
     maxDistanceMiles: row.max_distance_miles,
     preferredOrientations: row.preferred_orientations as SexualOrientation[],
-    preferredLookingFor: row.preferred_looking_for as LookingFor[],
+    preferredLookingFor: row.preferred_looking_for as GenderIdentity[],
     preferredQueerRoles: row.preferred_queer_roles as QueerRole[],
-    preferredPresentationTags: row.preferred_presentation_tags as PresentationTag[],
-    dealbreakers: row.dealbreakers,
-    niceToHaves: row.nice_to_haves,
+    preferredPresentationTags: normalizePresentationTags(row.preferred_presentation_tags),
     matchingPriorityOrder: normalizeMatchingPriorityOrder(
       row.matching_priority_order as MatchingPriorityCategory[] | undefined,
     ),

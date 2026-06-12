@@ -26,7 +26,7 @@ export function BlockedUsersScreen({ navigation }: BlockedUsersScreenProps) {
 
   return (
     <>
-      <ScreenContainer scroll contentStyle={styles.content}>
+      <ScreenContainer scroll={true} contentStyle={styles.content}>
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />

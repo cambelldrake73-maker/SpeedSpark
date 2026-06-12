@@ -1,10 +1,10 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View, ViewStyle } from 'react-native';
+import { Image, Platform, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { brand, colors, spacing } from '../constants/theme';
 
 interface BrandLogoProps {
-  size?: 'xs' | 'sm' | 'md' | 'auth' | 'lg' | 'hero';
-  style?: ViewStyle;
+  size?: 'xs' | 'sm' | 'md' | 'onboarding' | 'auth' | 'lg' | 'hero';
+  style?: StyleProp<ViewStyle>;
   centered?: boolean;
 }
 
@@ -13,6 +13,7 @@ const LOGO_HEIGHT: Record<NonNullable<BrandLogoProps['size']>, number> = {
   xs: 28,
   sm: 36,
   md: 50,
+  onboarding: 84,
   auth: 160,
   lg: 72,
   hero: 228,
@@ -32,6 +33,30 @@ export function BrandLogo({ size = 'md', style, centered = false }: BrandLogoPro
     </View>
   );
 }
+
+/** Compact centered logo on phones; full size on web — use across sign-up / log-in flow */
+export function AuthFlowLogo({ style }: { style?: StyleProp<ViewStyle> }) {
+  const compact = Platform.OS === 'ios' || Platform.OS === 'android';
+
+  return (
+    <BrandLogo
+      size={compact ? 'onboarding' : 'auth'}
+      centered={compact}
+      style={[compact ? authFlowStyles.compact : authFlowStyles.full, style]}
+    />
+  );
+}
+
+const authFlowStyles = StyleSheet.create({
+  compact: {
+    alignSelf: 'center',
+    marginBottom: spacing.sm,
+  },
+  full: {
+    alignSelf: 'flex-start',
+    marginBottom: spacing.lg,
+  },
+});
 
 /** Inline text wordmark when logo image isn't used */
 export function BrandWordmark({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {

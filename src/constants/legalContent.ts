@@ -12,14 +12,6 @@ export interface LegalDocument {
   sections: LegalSection[];
 }
 
-export const SIGNUP_AGREEMENT_POINTS = [
-  'You are 18 or older and eligible to use SpeedSpark in your region.',
-  'You will use your real name and accurate profile information.',
-  'You agree to treat other members with respect and follow our Community Guidelines.',
-  'You understand that speed dates are live video calls — you can leave, block, or report anytime.',
-  'Private post-date ratings and match preferences are never shown to other users.',
-];
-
 export const LEGAL_DOCUMENTS: Record<LegalDocumentId, LegalDocument> = {
   privacy: {
     id: 'privacy',
@@ -54,7 +46,7 @@ export const LEGAL_DOCUMENTS: Record<LegalDocumentId, LegalDocument> = {
       {
         title: 'Notifications',
         body:
-          'On web, optional SMS texts remind you before a speed date window goes live. In the iOS app, push notifications for messages and live events are managed through Apple. You can turn text reminders off in Settings.',
+          'Push notifications for messages and live events are managed in your device settings. In the app, open Settings → Enable notifications to allow alerts or open iOS/Android system settings.',
       },
       {
         title: 'Your controls',

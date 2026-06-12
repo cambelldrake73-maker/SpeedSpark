@@ -4,10 +4,11 @@ import {
   priorityWeights,
 } from '../constants/matchingPriorities';
 import type { DatingPreferences, MatchingPriorityCategory, UserProfile } from '../types';
+import type { AccountStatus } from '../types/safety';
 import type { CompatibilityResult, PairingCandidatePair } from '../types/matchingBackend';
 import { distanceMiles } from '../utils/matchingGeometry';
 import { NEUTRAL_APPEARANCE_SCORE } from './matchingAppearance';
-import { logMatchDecision } from './backendLogger';
+import { logBackendInfo, logMatchDecision } from './backendLogger';
 
 export interface MatchingContext {
   recentPairKeys?: Set<string>;
@@ -15,12 +16,12 @@ export interface MatchingContext {
   appearanceScoresByViewer?: Map<string, Map<string, number>>;
 }
 
-function hasOverlap<T extends string>(a: T[] | undefined, b: T[] | undefined): boolean {
-  if (!a?.length || !b?.length) {
-    return false;
-  }
-  const setB = new Set(b);
-  return a.some((v) => setB.has(v));
+type MatchProfile = UserProfile & { accountStatus?: AccountStatus };
+
+export interface DirectionalFitResult {
+  score: number;
+  reasons: string[];
+  categoryScores: Record<MatchingPriorityCategory, number>;
 }
 
 function overlapRatio(a: string[] | undefined, b: string[] | undefined): number {
@@ -36,30 +37,20 @@ function pairKey(userAId: string, userBId: string): string {
   return [userAId, userBId].sort().join(':');
 }
 
-function passesOrientationFilter(
-  viewerPrefs: Partial<DatingPreferences>,
-  partnerProfile: UserProfile,
-): boolean {
-  const preferred = viewerPrefs.preferredOrientations ?? [];
-  if (preferred.length === 0) {
-    return true;
-  }
-  return preferred.includes(partnerProfile.sexualOrientation);
+export function isActiveAccount(profile: MatchProfile): boolean {
+  return (profile.accountStatus ?? 'active') === 'active';
 }
 
-function hasDealbreakerHit(
+/** Hard gate: partner gender must appear in viewer preferredLookingFor. */
+export function passesGenderLookingForFilter(
   viewerPrefs: Partial<DatingPreferences>,
   partnerProfile: UserProfile,
 ): boolean {
-  const dealbreakers = viewerPrefs.dealbreakers ?? [];
-  if (dealbreakers.length === 0) {
+  const preferred = viewerPrefs.preferredLookingFor ?? [];
+  if (preferred.length === 0) {
     return false;
   }
-  const partnerTags = new Set([
-    ...partnerProfile.lifestyleTags,
-    ...partnerProfile.personalityTags,
-  ]);
-  return dealbreakers.some((tag) => partnerTags.has(tag));
+  return preferred.includes(partnerProfile.genderIdentity);
 }
 
 function exceedsMaxDistance(
@@ -134,27 +125,18 @@ function scoreDistanceFit(
 }
 
 function scoreDatingIntentionFit(
-  viewerPrefs: Partial<DatingPreferences>,
+  _viewerPrefs: Partial<DatingPreferences>,
   viewer: UserProfile,
   partner: UserProfile,
 ): number {
-  const preferred = viewerPrefs.preferredLookingFor ?? [];
-  const partnerGoals = partner.lookingFor ?? [];
-  if (preferred.length === 0) {
-    return Math.round(overlapRatio(viewer.lookingFor, partnerGoals) * 100);
-  }
-  return Math.round(overlapRatio(preferred, partnerGoals) * 100);
-}
+  const viewerIntentions = viewer.datingIntentions ?? [];
+  const partnerIntentions = partner.datingIntentions ?? [];
 
-function scoreQueerRoleFit(
-  viewerPrefs: Partial<DatingPreferences>,
-  partner: UserProfile,
-): number {
-  const preferred = viewerPrefs.preferredQueerRoles ?? [];
-  if (preferred.length === 0) {
-    return partner.queerRoles.length > 0 ? 70 : 50;
+  if (viewerIntentions.length === 0 || partnerIntentions.length === 0) {
+    return 50;
   }
-  return Math.round(overlapRatio(preferred, partner.queerRoles) * 100);
+
+  return Math.round(overlapRatio(viewerIntentions, partnerIntentions) * 100);
 }
 
 function scorePresentationFit(
@@ -168,28 +150,6 @@ function scorePresentationFit(
   return Math.round(overlapRatio(preferred, partner.presentationTags) * 100);
 }
 
-function scorePersonalityVibeFit(partner: UserProfile, other: UserProfile): number {
-  return Math.round(overlapRatio(partner.personalityTags, other.personalityTags) * 100);
-}
-
-function scoreLifestyleFit(
-  viewerPrefs: Partial<DatingPreferences>,
-  viewer: UserProfile,
-  partner: UserProfile,
-): number {
-  if (hasDealbreakerHit(viewerPrefs, partner)) {
-    return 0;
-  }
-
-  const niceHits =
-    viewerPrefs.niceToHaves?.filter(
-      (tag) => partner.lifestyleTags.includes(tag) || partner.personalityTags.includes(tag),
-    ).length ?? 0;
-
-  const base = Math.round(overlapRatio(viewer.lifestyleTags, partner.lifestyleTags) * 70);
-  return Math.min(100, base + niceHits * 15);
-}
-
 function scoreAppearanceFit(
   viewerId: string,
   partnerId: string,
@@ -200,6 +160,10 @@ function scoreAppearanceFit(
     return NEUTRAL_APPEARANCE_SCORE;
   }
   return viewerScores.get(partnerId) ?? NEUTRAL_APPEARANCE_SCORE;
+}
+
+function scoreLifestyleFit(viewer: UserProfile, partner: UserProfile): number {
+  return Math.round(overlapRatio(viewer.lifestyleTags, partner.lifestyleTags) * 100);
 }
 
 function scoreCategory(
@@ -216,27 +180,24 @@ function scoreCategory(
       return scoreDistanceFit(viewerPrefs, viewer, partner);
     case 'datingIntentionFit':
       return scoreDatingIntentionFit(viewerPrefs, viewer, partner);
-    case 'queerRoleFit':
-      return scoreQueerRoleFit(viewerPrefs, partner);
     case 'presentationFit':
       return scorePresentationFit(viewerPrefs, partner);
     case 'heightFit':
       return scoreHeightFit(viewerPrefs, partner);
-    case 'personalityVibeFit':
-      return scorePersonalityVibeFit(viewer, partner);
-    case 'lifestyleFit':
-      return scoreLifestyleFit(viewerPrefs, viewer, partner);
     case 'appearanceFit':
       return scoreAppearanceFit(viewer.id, partner.id, context);
+    case 'lifestyleFit':
+      return scoreLifestyleFit(viewer, partner);
     default:
       return 50;
   }
 }
 
-function collectHardBlockers(input: {
-  profileA: UserProfile;
+/** Collect hard eligibility blockers for a pair. Exported for framework tests. */
+export function collectHardBlockers(input: {
+  profileA: MatchProfile;
   prefsA: Partial<DatingPreferences>;
-  profileB: UserProfile;
+  profileB: MatchProfile;
   prefsB: Partial<DatingPreferences>;
   blockedA: Set<string>;
   blockedB: Set<string>;
@@ -247,6 +208,13 @@ function collectHardBlockers(input: {
 
   if (profileA.id === profileB.id) {
     blockers.push('Cannot match the same user');
+  }
+
+  if (!isActiveAccount(profileA)) {
+    blockers.push('Account A not active');
+  }
+  if (!isActiveAccount(profileB)) {
+    blockers.push('Account B not active');
   }
 
   if (input.blockedA.has(profileB.id) || input.blockedB.has(profileA.id)) {
@@ -262,18 +230,11 @@ function collectHardBlockers(input: {
     blockers.push('Reported relationship');
   }
 
-  if (!passesOrientationFilter(prefsA, profileB)) {
-    blockers.push('Orientation mismatch for A');
+  if (!passesGenderLookingForFilter(prefsA, profileB)) {
+    blockers.push('Gender looking-for mismatch for A');
   }
-  if (!passesOrientationFilter(prefsB, profileA)) {
-    blockers.push('Orientation mismatch for B');
-  }
-
-  if (hasDealbreakerHit(prefsA, profileB)) {
-    blockers.push('Dealbreaker for A');
-  }
-  if (hasDealbreakerHit(prefsB, profileA)) {
-    blockers.push('Dealbreaker for B');
+  if (!passesGenderLookingForFilter(prefsB, profileA)) {
+    blockers.push('Gender looking-for mismatch for B');
   }
 
   if (exceedsMaxDistance(prefsA, profileA, profileB)) {
@@ -291,12 +252,13 @@ export function scoreDirectionalFit(input: {
   viewerPrefs: Partial<DatingPreferences>;
   partner: UserProfile;
   context?: MatchingContext;
-}): { score: number; reasons: string[] } {
+}): DirectionalFitResult {
   const order = normalizeMatchingPriorityOrder(
     input.viewerPrefs.matchingPriorityOrder ?? DEFAULT_MATCHING_PRIORITY_ORDER,
   );
   const weights = priorityWeights(order);
   const reasons: string[] = [];
+  const categoryScores = {} as Record<MatchingPriorityCategory, number>;
   let score = 0;
 
   for (const category of order) {
@@ -307,14 +269,19 @@ export function scoreDirectionalFit(input: {
       input.partner,
       input.context,
     );
+    categoryScores[category] = categoryScore;
     score += weights[category] * categoryScore;
 
-    if (categoryScore >= 75) {
+    if (category !== 'appearanceFit' && categoryScore >= 75) {
       reasons.push(`${category} strong`);
     }
   }
 
-  return { score: Math.round(Math.min(100, Math.max(0, score))), reasons };
+  return {
+    score: Math.round(Math.min(100, Math.max(0, score))),
+    reasons,
+    categoryScores,
+  };
 }
 
 export function scoreMutualFit(
@@ -335,8 +302,8 @@ export function scoreMutualFit(
 }
 
 export function evaluateCompatibility(input: {
-  userA: { profile: UserProfile; preferences: Partial<DatingPreferences> };
-  userB: { profile: UserProfile; preferences: Partial<DatingPreferences> };
+  userA: { profile: MatchProfile; preferences: Partial<DatingPreferences> };
+  userB: { profile: MatchProfile; preferences: Partial<DatingPreferences> };
   blockedA: Set<string>;
   blockedB: Set<string>;
   context?: MatchingContext;
@@ -390,6 +357,16 @@ export function evaluateCompatibility(input: {
   const score = scoreMutualFit(aToB.score, bToA.score);
   const reasons = [...new Set([...aToB.reasons, ...bToA.reasons])];
 
+  logBackendInfo('matching.scoreDetail', {
+    userAId: profileA.id,
+    userBId: profileB.id,
+    scoreAtoB: aToB.score,
+    scoreBtoA: bToA.score,
+    mutualScore: score,
+    categoryScoresAtoB: aToB.categoryScores,
+    categoryScoresBtoA: bToA.categoryScores,
+  });
+
   const result: CompatibilityResult = {
     compatible: true,
     score,
@@ -412,7 +389,7 @@ export function evaluateCompatibility(input: {
 export function evaluateCompatibilityMatrix(
   candidates: Array<{
     userId: string;
-    profile: UserProfile;
+    profile: MatchProfile;
     preferences: Partial<DatingPreferences>;
     blockedIds: Set<string>;
   }>,

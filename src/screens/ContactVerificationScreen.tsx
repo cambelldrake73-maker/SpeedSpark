@@ -1,9 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, OtpInput, ScreenContainer } from '../components';
+import { Button, OtpInput, AuthFlowLogo, ScreenContainer } from '../components';
 import { colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
+import { isSupabaseConfigured } from '../services/supabaseEnv';
+import {
+  sendContactVerificationCode,
+  verifyContactCode,
+} from '../services/contactVerification';
 import type { ContactVerificationMethod } from '../types';
 import type { ContactVerificationScreenProps } from '../navigation/types';
 
@@ -21,8 +27,11 @@ function maskContact(method: 'phone' | 'email', value: string): string {
 }
 
 export function ContactVerificationScreen({ navigation, route }: ContactVerificationScreenProps) {
-  const { onboarding, markContactVerified, updateAccount, markLoggedIn } = useApp();
+  const { onboarding, markContactVerified, updateAccount, markLoggedIn, login, syncFromSupabase } =
+    useApp();
+  const { isSupabaseEnabled, session } = useAuth();
   const isSignup = route.params?.flow !== 'login';
+  const useLiveVerification = isSupabaseConfigured;
 
   const verification = useMemo(() => {
     const method: ContactVerificationMethod =
@@ -35,6 +44,47 @@ export function ContactVerificationScreen({ navigation, route }: ContactVerifica
 
   const [code, setCode] = useState('');
   const [secondsLeft, setSecondsLeft] = useState(45);
+  const [isSending, setIsSending] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [delivery, setDelivery] = useState<'sms' | 'call'>('sms');
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [devPreviewCode, setDevPreviewCode] = useState<string | null>(null);
+
+  const sendCode = useCallback(
+    async (nextDelivery: 'sms' | 'call') => {
+      if (!useLiveVerification) {
+        return;
+      }
+
+      setIsSending(true);
+      setSendError(null);
+      setDevPreviewCode(null);
+
+      try {
+        const result = await sendContactVerificationCode({
+          method: verification.method,
+          destination: verification.destination,
+          delivery: verification.method === 'phone' ? nextDelivery : undefined,
+        });
+
+        if (!result.ok) {
+          setSendError(result.error ?? 'Could not send verification code.');
+          return;
+        }
+
+        if (result.devPreviewCode) {
+          setDevPreviewCode(result.devPreviewCode);
+        }
+        setDelivery(nextDelivery);
+        setSecondsLeft(45);
+      } catch (error) {
+        setSendError(error instanceof Error ? error.message : 'Could not send verification code.');
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [useLiveVerification, verification.destination, verification.method],
+  );
 
   useEffect(() => {
     if (secondsLeft <= 0) return;
@@ -42,20 +92,73 @@ export function ContactVerificationScreen({ navigation, route }: ContactVerifica
     return () => clearInterval(timer);
   }, [secondsLeft]);
 
-  const handleVerify = () => {
-    if (code.replace(/\D/g, '').length < 6) {
-      Alert.alert('Enter your code', 'Type the full 6-digit code.');
+  useEffect(() => {
+    if (!verification.destination.trim() || !useLiveVerification) {
       return;
     }
+    void sendCode('sms');
+  }, [verification.method, verification.destination, useLiveVerification, sendCode]);
+
+  const completeVerification = async () => {
     markContactVerified();
+
+    if (!isSignup) {
+      if (isSupabaseEnabled && session?.user?.id) {
+        const { nextRoute } = await syncFromSupabase(session.user.id);
+        navigation.replace(nextRoute === 'Verification' ? 'SpeedDateLobby' : nextRoute);
+        return;
+      }
+      login();
+      navigation.replace('SpeedDateLobby');
+      return;
+    }
+
     markLoggedIn();
     navigation.replace('ProfileCreation');
   };
 
+  const handleVerify = async () => {
+    if (code.replace(/\D/g, '').length < 6) {
+      Alert.alert('Enter your code', 'Type the full 6-digit code.');
+      return;
+    }
+
+    if (!useLiveVerification) {
+      void completeVerification();
+      return;
+    }
+
+    setIsVerifying(true);
+    setSendError(null);
+    try {
+      const result = await verifyContactCode({
+        method: verification.method,
+        destination: verification.destination,
+        code,
+        delivery: verification.method === 'phone' ? delivery : undefined,
+      });
+
+      if (!result.approved) {
+        setSendError(result.error ?? 'Incorrect or expired code.');
+        return;
+      }
+
+      await completeVerification();
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : 'Verification failed.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleResend = () => {
-    if (secondsLeft > 0) return;
-    setSecondsLeft(45);
-    Alert.alert('Code sent', `A new code was sent to ${maskContact(verification.method, verification.destination)}.`);
+    if (secondsLeft > 0 || isSending) return;
+    void sendCode(verification.method === 'phone' ? delivery : 'sms');
+  };
+
+  const handleCallMe = () => {
+    if (isSending || verification.method !== 'phone') return;
+    void sendCode('call');
   };
 
   const switchMethod = () => {
@@ -72,11 +175,14 @@ export function ContactVerificationScreen({ navigation, route }: ContactVerifica
     navigation.setParams({ verificationMethod: next });
     setCode('');
     setSecondsLeft(45);
+    setSendError(null);
+    setDevPreviewCode(null);
+    setDelivery('sms');
   };
 
   if (!verification.destination.trim()) {
     return (
-      <ScreenContainer scroll contentStyle={styles.content}>
+      <ScreenContainer scroll={true} scrollToTopOnFocus contentStyle={styles.content}>
         <Text style={styles.title}>Missing contact info</Text>
         <Text style={styles.subtitle}>
           Go back and enter the {verification.method === 'phone' ? 'phone number' : 'email'} you
@@ -96,7 +202,8 @@ export function ContactVerificationScreen({ navigation, route }: ContactVerifica
   const { method, destination } = verification;
 
   return (
-    <ScreenContainer scroll contentStyle={styles.content}>
+    <ScreenContainer scroll={true} scrollToTopOnFocus contentStyle={styles.content}>
+      <AuthFlowLogo />
       <Pressable style={styles.backRow} onPress={() => navigation.goBack()}>
         <Ionicons name="chevron-back" size={22} color={colors.text} />
         <Text style={styles.backText}>Back</Text>
@@ -104,19 +211,48 @@ export function ContactVerificationScreen({ navigation, route }: ContactVerifica
 
       <View style={styles.iconCircle}>
         <Ionicons
-          name={method === 'phone' ? 'chatbubble-ellipses-outline' : 'mail-outline'}
+          name={
+            method === 'phone'
+              ? delivery === 'call'
+                ? 'call-outline'
+                : 'chatbubble-ellipses-outline'
+              : 'mail-outline'
+          }
           size={32}
           color={colors.sparkOrange}
         />
       </View>
 
       <Text style={styles.title}>
-        {method === 'phone' ? 'Enter the code we texted you' : 'Enter the code we emailed you'}
+        {method === 'phone'
+          ? delivery === 'call'
+            ? 'Enter the code from your call'
+            : 'Enter the code we texted you'
+          : 'Enter the code we emailed you'}
       </Text>
       <Text style={styles.subtitle}>
         Sent to <Text style={styles.destination}>{maskContact(method, destination)}</Text>
       </Text>
-      <Text style={styles.demoHint}>Demo: enter any 6 digits</Text>
+
+      {isSending ? (
+        <View style={styles.sendingRow}>
+          <ActivityIndicator color={colors.sparkOrange} />
+          <Text style={styles.sendingText}>Sending code…</Text>
+        </View>
+      ) : null}
+
+      {sendError ? (
+        <View style={styles.errorBanner}>
+          <Ionicons name="alert-circle" size={18} color={colors.error} />
+          <Text style={styles.errorText}>{sendError}</Text>
+        </View>
+      ) : null}
+
+      {!useLiveVerification ? (
+        <Text style={styles.demoHint}>Demo mode: enter any 6 digits</Text>
+      ) : devPreviewCode ? (
+        <Text style={styles.demoHint}>Dev code: {devPreviewCode}</Text>
+      ) : null}
 
       <OtpInput value={code} onChange={setCode} />
 
@@ -126,23 +262,24 @@ export function ContactVerificationScreen({ navigation, route }: ContactVerifica
             Resend code in 0:{String(secondsLeft).padStart(2, '0')}
           </Text>
         ) : (
-          <Pressable onPress={handleResend}>
+          <Pressable onPress={handleResend} disabled={isSending}>
             <Text style={styles.resendLink}>Resend code</Text>
           </Pressable>
         )}
       </View>
 
-      {method === 'phone' && (
-        <Pressable style={styles.altAction}>
+      {method === 'phone' && useLiveVerification ? (
+        <Pressable style={styles.altAction} onPress={handleCallMe} disabled={isSending}>
           <Text style={styles.altActionText}>Call me with the code instead</Text>
         </Pressable>
-      )}
+      ) : null}
 
       <Button
         title="Continue"
-        onPress={handleVerify}
+        onPress={() => void handleVerify()}
         size="lg"
-        disabled={!canVerify}
+        disabled={!canVerify || isVerifying}
+        loading={isVerifying}
         style={styles.submitBtn}
       />
 
@@ -197,6 +334,34 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: spacing.sm,
     lineHeight: 24,
+  },
+  sendingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  sendingText: {
+    ...typography.bodySmall,
+    color: colors.textMuted,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: colors.error,
+    borderRadius: 12,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  errorText: {
+    ...typography.bodySmall,
+    color: colors.error,
+    flex: 1,
+    lineHeight: 20,
   },
   demoHint: {
     ...typography.caption,

@@ -6,10 +6,7 @@ import type { MatchCompatibility } from '../utils/matching';
 import type { UserProfile } from '../types';
 import {
   GENDER_OPTIONS,
-  LOOKING_FOR_OPTIONS,
-  ORIENTATION_OPTIONS,
-  PRESENTATION_OPTIONS,
-  QUEER_ROLE_OPTIONS,
+  INTERESTED_IN_GENDER_OPTIONS,
 } from '../constants/options';
 
 interface CompatibilityCardProps {
@@ -41,9 +38,8 @@ export function CompatibilityCard({ partner, compatibility }: CompatibilityCardP
 
       <View style={styles.tags}>
         <MiniTag text={labelFor(GENDER_OPTIONS, partner.genderIdentity)} />
-        <MiniTag text={labelFor(ORIENTATION_OPTIONS, partner.sexualOrientation)} />
-        {partner.lookingFor.slice(0, 1).map((lf) => (
-          <MiniTag key={lf} text={labelFor(LOOKING_FOR_OPTIONS, lf)} />
+        {partner.interestedInGenders.slice(0, 2).map((gender) => (
+          <MiniTag key={gender} text={labelFor(INTERESTED_IN_GENDER_OPTIONS, gender)} />
         ))}
       </View>
 

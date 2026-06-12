@@ -38,9 +38,12 @@ export type QueerRole =
 
 export type PresentationTag =
   | 'masc'
+  | 'soft_masc'
   | 'fem'
-  | 'no_label'
-  | 'prefer_not_to_say';
+  | 'soft_fem'
+  | 'androgynous'
+  | 'balanced_masc_fem'
+  | 'gender_nonconforming';
 
 /** @deprecated Use queerRoles + presentationTags */
 export type QueerPreference = QueerRole | PresentationTag;
@@ -70,12 +73,17 @@ export interface UserProfile {
   photos: string[];
   genderIdentity: GenderIdentity;
   sexualOrientation: SexualOrientation;
-  lookingFor: LookingFor[];
+  /** What this member is looking for — dates, relationship, friends, etc. */
+  datingIntentions: LookingFor[];
+  /** Genders this member is open to meeting — stored in `looking_for`. */
+  interestedInGenders: GenderIdentity[];
   queerRoles: QueerRole[];
   presentationTags: PresentationTag[];
   personalityTags: string[];
   lifestyleTags: string[];
   verificationStatus: VerificationStatus;
+  /** Server-side account lifecycle — used by matching gates; defaults to active when omitted. */
+  accountStatus?: import('./safety').AccountStatus;
   /** Private internal match-fit signal — never shown to users */
   internalMatchFit?: number;
 }
@@ -84,12 +92,10 @@ export type MatchingPriorityCategory =
   | 'ageFit'
   | 'distanceFit'
   | 'datingIntentionFit'
-  | 'queerRoleFit'
   | 'presentationFit'
   | 'heightFit'
-  | 'personalityVibeFit'
-  | 'lifestyleFit'
-  | 'appearanceFit';
+  | 'appearanceFit'
+  | 'lifestyleFit';
 
 export interface DatingPreferences {
   ageRangeMin: number;
@@ -98,11 +104,10 @@ export interface DatingPreferences {
   heightMaxInches: number;
   maxDistanceMiles: number;
   preferredOrientations: SexualOrientation[];
-  preferredLookingFor: LookingFor[];
+  /** Genders this member is open to meeting — set in match preferences. */
+  preferredLookingFor: GenderIdentity[];
   preferredQueerRoles: QueerRole[];
   preferredPresentationTags: PresentationTag[];
-  dealbreakers: string[];
-  niceToHaves: string[];
   /** Most important → least important matching categories. */
   matchingPriorityOrder?: MatchingPriorityCategory[];
 }

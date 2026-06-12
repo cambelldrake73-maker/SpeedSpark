@@ -3,7 +3,7 @@ import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native
 import { Ionicons } from '@expo/vector-icons';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import type { Match, Message } from '../types';
-import { getMessageThreadMeta } from '../utils/messageThread';
+import { getMatchPreviewText, getMessageThreadMeta, isEmptyMatchThread } from '../utils/messageThread';
 
 interface MatchConversationRowProps {
   match: Match;
@@ -22,12 +22,13 @@ export function MatchConversationRow({
   onPress,
   onProfilePress,
 }: MatchConversationRowProps) {
-  const { turn, hasUnread, lastMessage } = getMessageThreadMeta(
+  const { turn, hasUnread } = getMessageThreadMeta(
     messages,
     currentUserId,
     lastReadAt,
   );
-  const preview = lastMessage?.text ?? match.lastMessage ?? 'Say hi 👋';
+  const preview = getMatchPreviewText(match, messages);
+  const isNewMatch = isEmptyMatchThread(messages, match);
   const photo = match.user.photos.find(Boolean);
 
   return (
@@ -69,7 +70,11 @@ export function MatchConversationRow({
           ) : null}
         </View>
         <Text
-          style={[styles.preview, hasUnread && styles.previewUnread]}
+          style={[
+            styles.preview,
+            hasUnread && styles.previewUnread,
+            isNewMatch && styles.previewNewMatch,
+          ]}
           numberOfLines={1}
         >
           {hasUnread ? `${match.user.name}: ${preview}` : preview}
@@ -85,19 +90,18 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.background,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
     gap: spacing.md,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null),
   },
   rowUnread: {
-    backgroundColor: 'rgba(245, 130, 32, 0.08)',
-    borderColor: colors.sparkOrange,
-    borderLeftWidth: 4,
+    backgroundColor: 'rgba(245, 130, 32, 0.06)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.sparkOrange,
   },
   rowPressed: {
     opacity: 0.92,
@@ -186,5 +190,9 @@ const styles = StyleSheet.create({
   previewUnread: {
     color: colors.text,
     fontWeight: '600',
+  },
+  previewNewMatch: {
+    color: colors.textMuted,
+    fontStyle: 'italic',
   },
 });

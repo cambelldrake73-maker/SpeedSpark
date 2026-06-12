@@ -18,6 +18,17 @@ export const GENDER_OPTIONS: { value: GenderIdentity; label: string }[] = [
   { value: 'prefer_not_to_say', label: 'Prefer not to say' },
 ];
 
+/** Who the member wants to meet — set in match preferences. */
+export const INTERESTED_IN_GENDER_OPTIONS: { value: GenderIdentity; label: string }[] = [
+  { value: 'man', label: 'Male' },
+  { value: 'woman', label: 'Female' },
+  { value: 'non_binary', label: 'Non-binary' },
+  { value: 'genderqueer', label: 'Genderqueer' },
+  { value: 'trans_woman', label: 'Trans woman' },
+  { value: 'trans_man', label: 'Trans man' },
+  { value: 'other', label: 'Other' },
+];
+
 export const ORIENTATION_OPTIONS: { value: SexualOrientation; label: string }[] = [
   { value: 'lesbian', label: 'Lesbian' },
   { value: 'gay', label: 'Gay' },
@@ -68,29 +79,93 @@ export const QUEER_ROLE_OPTIONS: { value: QueerRole; label: string; description?
   { value: 'prefer_not_to_say', label: 'Prefer not to say' },
 ];
 
-export const PRESENTATION_OPTIONS: { value: PresentationTag; label: string }[] = [
-  { value: 'masc', label: 'Masc' },
-  { value: 'fem', label: 'Fem' },
-  { value: 'no_label', label: 'No label' },
-  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+export const PRESENTATION_TAG_VALUES: PresentationTag[] = [
+  'masc',
+  'soft_masc',
+  'fem',
+  'soft_fem',
+  'androgynous',
+  'balanced_masc_fem',
+  'gender_nonconforming',
 ];
 
-export const PERSONALITY_TAGS = [
+export const PRESENTATION_OPTIONS: { value: PresentationTag; label: string }[] = [
+  { value: 'masc', label: 'Masculine' },
+  { value: 'soft_masc', label: 'Soft Masculine' },
+  { value: 'fem', label: 'Feminine' },
+  { value: 'soft_fem', label: 'Soft Feminine' },
+  { value: 'androgynous', label: 'Androgynous' },
+  { value: 'balanced_masc_fem', label: 'Balanced Masculine & Feminine' },
+  { value: 'gender_nonconforming', label: 'Gender Nonconforming' },
+];
+
+const LEGACY_PRESENTATION_TAG_MAP: Record<string, PresentationTag> = {
+  butch: 'masc',
+  stud: 'masc',
+  tomboy: 'soft_masc',
+  femme: 'fem',
+  high_fem: 'fem',
+  stem: 'balanced_masc_fem',
+  neutral: 'androgynous',
+  fluid: 'androgynous',
+  eclectic: 'gender_nonconforming',
+};
+
+/** Maps stored tags to the current presentation set (drops removed values). */
+export function normalizePresentationTags(
+  tags: string[] | null | undefined,
+): PresentationTag[] {
+  const seen = new Set<PresentationTag>();
+  const normalized: PresentationTag[] = [];
+
+  for (const tag of tags ?? []) {
+    let mapped: PresentationTag | undefined;
+    if (PRESENTATION_TAG_VALUES.includes(tag as PresentationTag)) {
+      mapped = tag as PresentationTag;
+    } else {
+      mapped = LEGACY_PRESENTATION_TAG_MAP[tag];
+    }
+    if (mapped && !seen.has(mapped)) {
+      seen.add(mapped);
+      normalized.push(mapped);
+    }
+  }
+
+  return normalized;
+}
+
+/** Self-selected on profile */
+export const LIFESTYLE_TAG_MAX = 5;
+
+export const LIFESTYLE_TAG_OPTIONS = [
+  'Fitness Focused',
+  'Outdoorsy',
+  'Traveler',
+  'Homebody',
+  'Foodie',
+  'Nightlife Lover',
+  'Sober',
+  'Social Drinker',
+  'Family Oriented',
+  'Wants Kids Someday',
+  'Monogamous',
+  'Spiritual',
+  'Creative',
+  'Ambitious',
+  'Curious',
+  'Playful',
+  'Funny',
+  'Thoughtful',
   'Introvert',
   'Extrovert',
-  'Creative',
-  'Outdoorsy',
-  'Foodie',
   'Bookworm',
   'Night owl',
   'Early bird',
-  'Spiritual',
   'Activist',
   'Gamer',
   'Fitness',
   'Chill',
   'Adventurous',
-  'Homebody',
   'Music lover',
   'Dog person',
   'Cat person',
@@ -98,48 +173,33 @@ export const PERSONALITY_TAGS = [
   'Direct communicator',
 ];
 
-/** Self-selected on profile — dealbreakers must come from this list only */
-export const LIFESTYLE_TAG_OPTIONS = [
-  'Non-smoker',
-  'Smoker',
-  'Sober',
-  'Social drinker',
-  'Heavy drinker',
-  'Wants kids someday',
-  'Open to kids',
-  "Doesn't want kids",
-  'Monogamous',
-  'Non-monogamous',
-  'Out and proud',
-  'Not out yet',
-];
+const LEGACY_LIFESTYLE_TAG_MAP: Record<string, string> = {
+  'Social drinker': 'Social Drinker',
+  'Wants kids someday': 'Wants Kids Someday',
+};
 
-/** Traits a match can list on their profile that you want to avoid */
-export const DEALBREAKER_OPTIONS: string[] = [
-  'Smoker',
-  'Heavy drinker',
-  'Not out yet',
-  'Wants kids someday',
-  "Doesn't want kids",
-  'Non-monogamous',
-];
+/** Maps stored tags to the current lifestyle list (drops removed values). */
+export function normalizeLifestyleTags(
+  lifestyleTags: string[] | null | undefined,
+  personalityTags?: string[] | null | undefined,
+): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  const combined = [...(lifestyleTags ?? []), ...(personalityTags ?? [])];
 
-/** Must match personality tags, lifestyle tags, or verified status on a profile */
-export const NICE_TO_HAVE_OPTIONS: string[] = [
-  'Verified profile',
-  'Romantic',
-  'Direct communicator',
-  'Activist',
-  'Night owl',
-  'Early bird',
-  'Chill',
-  'Creative',
-  'Monogamous',
-  'Open to kids',
-  'Non-smoker',
-  'Sober',
-  'Out and proud',
-];
+  for (const tag of combined) {
+    let mapped = tag;
+    if (!LIFESTYLE_TAG_OPTIONS.includes(tag)) {
+      mapped = LEGACY_LIFESTYLE_TAG_MAP[tag] ?? '';
+    }
+    if (mapped && LIFESTYLE_TAG_OPTIONS.includes(mapped) && !seen.has(mapped)) {
+      seen.add(mapped);
+      normalized.push(mapped);
+    }
+  }
+
+  return normalized.slice(0, LIFESTYLE_TAG_MAX);
+}
 
 /** Valid height range stored as total inches */
 export const HEIGHT_MIN_INCHES = 48;
@@ -163,9 +223,7 @@ export const SPARK_SIGNAL_OPTIONS = [
 
 /** Post-date survey — how you read their presentation */
 export const PERCEIVED_PRESENTATION_OPTIONS: { value: PresentationTag; label: string }[] = [
-  { value: 'masc', label: 'Masc' },
-  { value: 'fem', label: 'Fem' },
-  { value: 'no_label', label: 'No clear label' },
+  ...PRESENTATION_OPTIONS,
 ];
 
 /** Post-date survey — private appearance balance (never shown as a number) */
@@ -187,5 +245,5 @@ export const COPY = {
   fiveMinute:
     'Each speed date is exactly 5 minutes. Be present, be kind, and trust your gut.',
   scheduledWindows:
-    'SpeedSpark goes live during scheduled date windows only — not 24/7. Drop in when a window opens.',
+    'SpeedSpark goes live during scheduled date windows only — not 24/7.',
 };

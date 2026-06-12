@@ -1,5 +1,22 @@
 import { HEIGHT_MAX_INCHES, HEIGHT_MIN_INCHES } from '../constants/options';
 
+export function normalizeHeightInches(value: unknown, fallback: number): number {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(HEIGHT_MAX_INCHES, Math.max(HEIGHT_MIN_INCHES, Math.round(parsed)));
+}
+
+export function normalizeHeightRange(minInches: number, maxInches: number): { min: number; max: number } {
+  const min = normalizeHeightInches(minInches, HEIGHT_MIN_INCHES);
+  const max = normalizeHeightInches(maxInches, HEIGHT_MAX_INCHES);
+  return {
+    min: Math.min(min, max),
+    max: Math.max(min, max),
+  };
+}
+
 export function formatHeightInches(inches: number): string {
   const feet = Math.floor(inches / 12);
   const rem = inches % 12;

@@ -38,9 +38,11 @@ In the Supabase Dashboard, open **SQL Editor** and run **in order**:
 8. `supabase/migrations/008_profile_photos_storage.sql`
 9. `supabase/migrations/009_account_safety.sql`
 10. `supabase/migrations/010_speed_date_calls.sql`
+11. `supabase/migrations/011_contact_verification.sql`
 
 See [docs/MODERATION.md](../docs/MODERATION.md) for report review and account status workflows.  
-See [docs/LIVEKIT_SETUP.md](../docs/LIVEKIT_SETUP.md) for voice call setup (LiveKit + Edge Functions).
+See [docs/LIVEKIT_SETUP.md](../docs/LIVEKIT_SETUP.md) for voice call setup (LiveKit + Edge Functions).  
+See [docs/CONTACT_VERIFICATION_SETUP.md](../docs/CONTACT_VERIFICATION_SETUP.md) for SMS / voice / email OTP setup (Twilio Verify + Resend).
 
 ## 4. Enable Realtime (queue + speed dates + feedback + messages)
 
@@ -61,6 +63,8 @@ In **Authentication → Providers → Email**:
 
 Phone OTP can be added later (requires SMS provider).
 
+For **real SMS, voice call, and email codes** on the contact verification screen, see [docs/CONTACT_VERIFICATION_SETUP.md](../docs/CONTACT_VERIFICATION_SETUP.md).
+
 ## 6. What works today
 
 | Feature | With `.env` configured |
@@ -76,7 +80,7 @@ Phone OTP can be added later (requires SMS provider).
 | Post-date feedback | `date_feedback` via `submit_date_feedback_and_resolve` RPC |
 | Mutual matches | `matches` row when both users say yes |
 | Messaging | `messages` table + realtime thread updates |
-| Phone sign up / OTP | Still uses demo flow (mock) |
+| Phone sign up / OTP | Real codes via Twilio Verify when Edge Function secrets are set |
 
 Without `.env`, the app runs in **full demo mode** with mock data.
 

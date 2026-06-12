@@ -1,27 +1,24 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Button,
-  CameraEffectsPanel,
   DraggableVideoPiP,
   LocalCameraPreview,
   PIP_HEIGHT,
   PIP_WIDTH,
   ScreenContainer,
-  usePiPStageLayout,
 } from '../components';
-import type { BlurLevel, VirtualBackground } from '../constants/cameraEffects';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { DATE_DURATION_SECONDS } from '../data/mockSpeedDates';
 import { useMediaAccess } from '../hooks/useMediaAccess';
 import { useSpeedDateCall } from '../hooks/useSpeedDateCall';
 import { useApp } from '../context/AppContext';
 import { isSupabaseConfigured, reportUser, updateSpeedDateStatus } from '../services';
+import { cardShadow } from '../utils/platformStyles';
 import type { ActiveDateScreenProps } from '../navigation/types';
 
-const ZOOM_LEVELS = [0, 0.12, 0.24, 0.36];
-const PIP_MARGIN = 12;
+const PIP_MARGIN = 8;
 
 export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   const { partner, speedDateId } = route.params;
@@ -32,18 +29,48 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [selfExpanded, setSelfExpanded] = useState(false);
   const [selfVisible, setSelfVisible] = useState(true);
-  const [zoomIndex, setZoomIndex] = useState(0);
-  const [blurLevel, setBlurLevel] = useState<BlurLevel>('off');
-  const [virtualBackground, setVirtualBackground] = useState<VirtualBackground>('none');
   const [facing, setFacing] = useState<'front' | 'back'>('front');
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showBlockConfirm, setShowBlockConfirm] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
-  const [showSelfSettings, setShowSelfSettings] = useState(false);
 
-  const { granted: hasMediaAccess, pending: permissionsPending, denied, errorMessage, requestAccess } =
+  const { granted: hasMediaAccess, pending: permissionsPending, denied, errorMessage, requestAccess, openSettings } =
     useMediaAccess();
-  const { stageWidth, stageHeight, onStageLayout } = usePiPStageLayout();
+  const dragAreaRef = useRef<View>(null);
+  const stageRef = useRef<View>(null);
+  const pipInitialSetRef = useRef(false);
+  const [dragBounds, setDragBounds] = useState({ width: 0, height: 0 });
+  const [pipInitialPosition, setPipInitialPosition] = useState<{ x: number; y: number } | null>(
+    null,
+  );
+
+  const onDragAreaLayout = useCallback((event: { nativeEvent: { layout: { width: number; height: number } } }) => {
+    const { width, height } = event.nativeEvent.layout;
+    setDragBounds((prev) =>
+      prev.width === width && prev.height === height ? prev : { width, height },
+    );
+  }, []);
+
+  const syncPiPInitialPosition = useCallback(() => {
+    if (pipInitialSetRef.current) {
+      return;
+    }
+    const dragArea = dragAreaRef.current;
+    const stage = stageRef.current;
+    if (!dragArea || !stage) {
+      return;
+    }
+
+    dragArea.measureInWindow((hostX, hostY) => {
+      stage.measureInWindow((stageX, stageY, stageWidth) => {
+        pipInitialSetRef.current = true;
+        setPipInitialPosition({
+          x: Math.max(PIP_MARGIN, stageX + stageWidth - PIP_WIDTH - PIP_MARGIN - hostX),
+          y: Math.max(PIP_MARGIN, stageY + PIP_MARGIN - hostY),
+        });
+      });
+    });
+  }, []);
 
   const voiceCallEnabled =
     Boolean(speedDateId) &&
@@ -56,7 +83,6 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     partnerConnected,
     isMuted: voiceMuted,
     setMuted: setVoiceMuted,
-    statusLabel: voiceStatusLabel,
     leave: leaveVoiceCall,
   } = useSpeedDateCall({
     speedDateId,
@@ -80,10 +106,20 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   }, [partner, setCurrentDatePartner]);
 
   useEffect(() => {
-    if (!selfExpanded) {
-      setShowSelfSettings(false);
-    }
-  }, [selfExpanded]);
+    pipInitialSetRef.current = false;
+    setPipInitialPosition(null);
+    const frame = requestAnimationFrame(() => {
+      syncPiPInitialPosition();
+    });
+    const retry = setTimeout(() => {
+      pipInitialSetRef.current = false;
+      syncPiPInitialPosition();
+    }, 350);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(retry);
+    };
+  }, [selfExpanded, syncPiPInitialPosition, dragBounds.width, dragBounds.height]);
 
   const goToFeedback = useCallback(async () => {
     if (hasEndedRef.current) {
@@ -123,21 +159,9 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   const seconds = secondsLeft % 60;
   const progress = 1 - secondsLeft / DATE_DURATION_SECONDS;
   const isUrgent = secondsLeft <= 30;
-  const zoom = ZOOM_LEVELS[zoomIndex];
 
   const handleEndEarly = () => {
-    if (Platform.OS === 'web') {
-      setShowEndConfirm(true);
-      return;
-    }
-    Alert.alert(
-      'End this date?',
-      'You can leave anytime. Your comfort always comes first.',
-      [
-        { text: 'Stay', style: 'cancel' },
-        { text: 'End date', style: 'destructive', onPress: goToFeedback },
-      ],
-    );
+    setShowEndConfirm(true);
   };
 
   const submitReport = useCallback(async () => {
@@ -158,18 +182,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   }, [currentUser.id, goToFeedback, partner.id, speedDateId]);
 
   const handleReport = () => {
-    if (Platform.OS === 'web') {
-      setShowReportConfirm(true);
-      return;
-    }
-    Alert.alert(
-      `Report ${partner.name}?`,
-      'Thanks for letting us know. This date will end and our safety team will review.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Report & end', style: 'destructive', onPress: () => void submitReport() },
-      ],
-    );
+    setShowReportConfirm(true);
   };
 
   const confirmReport = () => {
@@ -177,22 +190,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   };
 
   const handleBlock = () => {
-    if (Platform.OS === 'web') {
-      setShowBlockConfirm(true);
-      return;
-    }
-    Alert.alert(
-      `Block ${partner.name}?`,
-      'This ends the call immediately. They will not be able to match or message you again.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Block & leave',
-          style: 'destructive',
-          onPress: confirmBlock,
-        },
-      ],
-    );
+    setShowBlockConfirm(true);
   };
 
   const confirmBlock = async () => {
@@ -214,21 +212,30 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     setSelfExpanded((expanded) => !expanded);
   };
 
+  const flipCamera = () => {
+    setFacing((current) => (current === 'front' ? 'back' : 'front'));
+  };
+
   const selfCamera = (
     <LocalCameraPreview
       enabled={isVideoOn && hasMediaAccess}
-      zoom={zoom}
       facing={facing}
-      blurLevel={blurLevel}
-      virtualBackground={virtualBackground}
       mute={isVoiceMuted}
-      compact={!selfExpanded}
+      compact
       label="You"
     />
   );
 
+  const showPipOverlay =
+    ((!selfExpanded && selfVisible) || selfExpanded) &&
+    !showEndConfirm &&
+    !showReportConfirm &&
+    !showBlockConfirm;
+
   return (
+    <>
     <ScreenContainer style={styles.container} contentStyle={styles.content}>
+      <View ref={dragAreaRef} style={styles.pipHost} onLayout={onDragAreaLayout}>
       {!hasMediaAccess && (
         <View style={styles.permissionBanner}>
           <Ionicons name="videocam-outline" size={24} color={colors.sparkOrange} />
@@ -240,8 +247,20 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
           </Text>
           {errorMessage ? <Text style={styles.permissionError}>{errorMessage}</Text> : null}
           <Button
-            title={permissionsPending ? 'Requesting…' : 'Allow camera & mic'}
-            onPress={() => void requestAccess()}
+            title={
+              permissionsPending
+                ? 'Requesting…'
+                : denied && Platform.OS !== 'web'
+                  ? 'Open Settings'
+                  : 'Allow camera & mic'
+            }
+            onPress={() => {
+              if (denied && Platform.OS !== 'web') {
+                openSettings();
+                return;
+              }
+              void requestAccess();
+            }}
             size="md"
             disabled={permissionsPending}
             style={styles.permissionBtn}
@@ -264,63 +283,16 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
         </View>
       </View>
 
-      <View style={styles.stage} onLayout={onStageLayout}>
+      <View style={styles.videoSection}>
+      <View ref={stageRef} style={styles.stage} onLayout={syncPiPInitialPosition}>
         {selfExpanded ? (
-          <>
-            <View style={styles.mainFeed}>{selfCamera}</View>
-            <Pressable
-              style={[
-                styles.partnerPiP,
-                {
-                  left: Math.max(PIP_MARGIN, stageWidth - PIP_WIDTH - PIP_MARGIN),
-                  top: Math.max(PIP_MARGIN, stageHeight - PIP_HEIGHT - PIP_MARGIN),
-                },
-              ]}
-              onPress={toggleSelfView}
-              accessibilityLabel="Partner video. Tap to swap views."
-            >
-              <PartnerVideoPane
-                compact
-                voiceMode={Boolean(speedDateId)}
-                partnerConnected={partnerConnected}
-                connectionState={voiceConnectionState}
-              />
-            </Pressable>
-          </>
+          <View style={styles.mainFeed}>{selfCamera}</View>
         ) : (
-          <>
-            <PartnerVideoPane
-              voiceMode={Boolean(speedDateId)}
-              partnerConnected={partnerConnected}
-              connectionState={voiceConnectionState}
-            />
-            <DraggableVideoPiP
-              stageWidth={stageWidth}
-              stageHeight={stageHeight}
-              visible={selfVisible}
-              onSwap={toggleSelfView}
-              onHide={() => setSelfVisible(false)}
-            >
-              {selfCamera}
-            </DraggableVideoPiP>
-          </>
-        )}
-
-        {selfExpanded && showSelfSettings && (
-          <View style={styles.expandedEffectsBar} pointerEvents="box-none">
-            <CameraEffectsPanel
-              blurLevel={blurLevel}
-              virtualBackground={virtualBackground}
-              onBlurChange={setBlurLevel}
-              onBackgroundChange={setVirtualBackground}
-              onZoomOut={() => setZoomIndex((i) => Math.max(0, i - 1))}
-              onZoomIn={() => setZoomIndex((i) => Math.min(ZOOM_LEVELS.length - 1, i + 1))}
-              onFlip={() => setFacing((f) => (f === 'front' ? 'back' : 'front'))}
-              onClose={() => setShowSelfSettings(false)}
-              zoomOutDisabled={zoomIndex === 0}
-              zoomInDisabled={zoomIndex === ZOOM_LEVELS.length - 1}
-            />
-          </View>
+          <PartnerVideoPane
+            voiceMode={Boolean(speedDateId)}
+            partnerConnected={partnerConnected}
+            connectionState={voiceConnectionState}
+          />
         )}
 
         <View style={[styles.stageTopBar, !selfExpanded && styles.stageTopBarCompact]}>
@@ -330,51 +302,6 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
               <Text style={styles.stageChipText}>Show camera</Text>
             </Pressable>
           )}
-          {selfExpanded && (
-            <Pressable
-              style={[styles.stageChip, showSelfSettings && styles.stageChipActive]}
-              onPress={() => setShowSelfSettings((v) => !v)}
-            >
-              <Ionicons name="options-outline" size={14} color={colors.text} />
-              <Text style={styles.stageChipText}>Effects</Text>
-            </Pressable>
-          )}
-          <View style={styles.stageStatusChip}>
-            <Ionicons
-              name={
-                speedDateId
-                  ? voiceConnectionState === 'connected' && partnerConnected
-                    ? 'radio'
-                    : voiceConnectionState === 'failed'
-                      ? 'alert-circle-outline'
-                      : 'radio-outline'
-                  : hasMediaAccess
-                    ? 'radio-outline'
-                    : 'alert-circle-outline'
-              }
-              size={12}
-              color={
-                speedDateId
-                  ? voiceConnectionState === 'connected' && partnerConnected
-                    ? colors.success
-                    : voiceConnectionState === 'failed'
-                      ? colors.error
-                      : colors.sparkOrange
-                  : hasMediaAccess
-                    ? colors.success
-                    : colors.sparkOrange
-              }
-            />
-            <Text style={styles.stageStatusText}>
-              {speedDateId
-                ? voiceStatusLabel
-                : hasMediaAccess
-                  ? 'Mic ready'
-                  : denied
-                    ? 'No access'
-                    : 'Waiting…'}
-            </Text>
-          </View>
         </View>
 
         <View style={styles.stageControls}>
@@ -383,6 +310,12 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
             onPress={toggleMute}
             active={isVoiceMuted}
             label={isVoiceMuted ? 'Unmute' : 'Mute'}
+          />
+          <OverlayIcon
+            icon="camera-reverse-outline"
+            onPress={flipCamera}
+            disabled={!isVideoOn || !hasMediaAccess}
+            label="Flip camera"
           />
           <OverlayIcon
             icon={isVideoOn ? 'videocam' : 'videocam-off'}
@@ -396,63 +329,129 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
             active={!isSpeakerOn}
             label="Speaker"
           />
-          <OverlayIcon icon="flag" onPress={handleReport} danger label="Report" />
-          <OverlayIcon icon="ban" onPress={handleBlock} danger label="Block" />
+        </View>
+      </View>
+      </View>
+
+      <View style={styles.footerActions}>
+        <Button title="End date early" onPress={handleEndEarly} variant="outline" size="md" />
+        <View style={styles.safetyLinks}>
+          <Pressable
+            onPress={handleReport}
+            style={({ pressed }) => [styles.safetyLink, pressed && styles.safetyLinkPressed]}
+            accessibilityLabel="Report"
+          >
+            <Ionicons name="flag-outline" size={15} color={colors.error} />
+            <Text style={styles.safetyLinkText}>Report</Text>
+          </Pressable>
+          <View style={styles.safetyLinkDivider} />
+          <Pressable
+            onPress={handleBlock}
+            style={({ pressed }) => [styles.safetyLink, pressed && styles.safetyLinkPressed]}
+            accessibilityLabel="Block"
+          >
+            <Ionicons name="ban-outline" size={15} color={colors.error} />
+            <Text style={styles.safetyLinkText}>Block</Text>
+          </Pressable>
         </View>
       </View>
 
-      <Text style={styles.stageHint}>
-        Tap the small video to swap views · drag your camera to move it
-      </Text>
+      {dragBounds.width > 0 && showPipOverlay && !selfExpanded && selfVisible ? (
+        <DraggableVideoPiP
+          key="self-pip"
+          boundsWidth={dragBounds.width}
+          boundsHeight={dragBounds.height}
+          initialPosition={pipInitialPosition}
+          onSwap={toggleSelfView}
+          onHide={() => setSelfVisible(false)}
+        >
+          {selfCamera}
+        </DraggableVideoPiP>
+      ) : null}
 
-      {showEndConfirm && (
-        <View style={styles.confirmCard}>
-          <Text style={styles.confirmTitle}>End this date?</Text>
-          <Text style={styles.confirmText}>
-            You can leave anytime. Your comfort always comes first.
-          </Text>
-          <View style={styles.confirmActions}>
-            <Button title="Stay" onPress={() => setShowEndConfirm(false)} variant="outline" size="sm" />
-            <Button title="End date" onPress={goToFeedback} variant="primary" size="sm" />
-          </View>
-        </View>
-      )}
-
-      {showReportConfirm && (
-        <View style={styles.confirmCard}>
-          <Text style={styles.confirmTitle}>Report {partner.name}?</Text>
-          <Text style={styles.confirmText}>
-            Thanks for letting us know. This date will end and our safety team will review.
-          </Text>
-          <View style={styles.confirmActions}>
-            <Button title="Cancel" onPress={() => setShowReportConfirm(false)} variant="outline" size="sm" />
-            <Button title="Report & end" onPress={confirmReport} size="sm" />
-          </View>
-        </View>
-      )}
-
-      {showBlockConfirm && (
-        <View style={styles.confirmCard}>
-          <Text style={styles.confirmTitle}>Block {partner.name}?</Text>
-          <Text style={styles.confirmText}>
-            This ends the call immediately. They won't be able to match or message you again.
-          </Text>
-          <View style={styles.confirmActions}>
-            <Button title="Cancel" onPress={() => setShowBlockConfirm(false)} variant="outline" size="sm" />
-            <Button title="Block & leave" onPress={confirmBlock} size="sm" />
-          </View>
-        </View>
-      )}
-
-      <View style={styles.safety}>
-        <Ionicons name="shield-checkmark" size={16} color={colors.sparkOrange} />
-        <Text style={styles.safetyText}>
-          End, report, or block anytime. You never owe anyone your time.
-        </Text>
+      {dragBounds.width > 0 && showPipOverlay && selfExpanded ? (
+        <DraggableVideoPiP
+          key="partner-pip"
+          boundsWidth={dragBounds.width}
+          boundsHeight={dragBounds.height}
+          initialPosition={pipInitialPosition}
+          onSwap={toggleSelfView}
+          onHide={() => {}}
+          showCloseButton={false}
+        >
+          <PartnerVideoPane
+            compact
+            voiceMode={Boolean(speedDateId)}
+            partnerConnected={partnerConnected}
+            connectionState={voiceConnectionState}
+          />
+        </DraggableVideoPiP>
+      ) : null}
       </View>
-
-      <Button title="End date early" onPress={handleEndEarly} variant="outline" size="md" />
     </ScreenContainer>
+
+    <DateConfirmModal
+      visible={showEndConfirm}
+      title="End this date?"
+      cancelLabel="Stay"
+      confirmLabel="End date"
+      onCancel={() => setShowEndConfirm(false)}
+      onConfirm={goToFeedback}
+    />
+
+    <DateConfirmModal
+      visible={showReportConfirm}
+      title={`Report ${partner.name}?`}
+      message="This date will end and our team will review."
+      cancelLabel="Cancel"
+      confirmLabel="Report & end"
+      onCancel={() => setShowReportConfirm(false)}
+      onConfirm={confirmReport}
+    />
+
+    <DateConfirmModal
+      visible={showBlockConfirm}
+      title={`Block ${partner.name}?`}
+      message="They won't be able to match or message you again."
+      cancelLabel="Cancel"
+      confirmLabel="Block & leave"
+      onCancel={() => setShowBlockConfirm(false)}
+      onConfirm={() => void confirmBlock()}
+    />
+    </>
+  );
+}
+
+function DateConfirmModal({
+  visible,
+  title,
+  message,
+  cancelLabel,
+  confirmLabel,
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  title: string;
+  message?: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <Pressable style={styles.confirmOverlay} onPress={onCancel} accessibilityLabel="Dismiss">
+        <Pressable style={styles.confirmCard} onPress={(event) => event.stopPropagation()}>
+          <Text style={styles.confirmTitle}>{title}</Text>
+          {message ? <Text style={styles.confirmText}>{message}</Text> : null}
+          <View style={styles.confirmActions}>
+            <Button title={cancelLabel} onPress={onCancel} variant="outline" size="sm" style={styles.confirmBtn} />
+            <Button title={confirmLabel} onPress={onConfirm} size="sm" style={styles.confirmBtn} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -474,13 +473,6 @@ function PartnerVideoPane({
         ? 'Connecting voice…'
         : 'Waiting for date…'
     : 'Live video';
-  const badgeText = voiceMode
-    ? partnerConnected
-      ? 'On call'
-      : 'Voice'
-    : compact
-      ? 'Date'
-      : 'Video feed';
 
   return (
     <View style={[compact ? styles.partnerPiPFeed : styles.mainFeed, styles.partnerFeed]}>
@@ -498,10 +490,6 @@ function PartnerVideoPane({
           <Text style={styles.paneSub}>{paneSub}</Text>
         </>
       )}
-      <View style={[styles.feedBadge, compact && styles.feedBadgeCompact]}>
-        <View style={[styles.feedDot, voiceMode && partnerConnected && styles.feedDotLive]} />
-        <Text style={styles.feedBadgeText}>{badgeText}</Text>
-      </View>
     </View>
   );
 }
@@ -558,11 +546,25 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  pipHost: {
+    flex: 1,
+    width: '100%',
+    alignSelf: 'stretch',
+    position: 'relative',
+  },
+  videoSection: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    alignSelf: 'stretch',
   },
   permissionBanner: {
     alignItems: 'center',
+    alignSelf: 'stretch',
     backgroundColor: colors.accentLight,
     borderWidth: 1,
     borderColor: 'rgba(245, 130, 32, 0.35)',
@@ -598,7 +600,8 @@ const styles = StyleSheet.create({
   },
   topBar: {
     width: '100%',
-    marginBottom: spacing.md,
+    alignSelf: 'stretch',
+    marginBottom: spacing.sm,
   },
   timerRow: {
     flexDirection: 'row',
@@ -651,15 +654,14 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
   stage: {
+    flex: 1,
     width: '100%',
-    aspectRatio: 3 / 4,
-    maxHeight: 440,
+    alignSelf: 'stretch',
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: spacing.sm,
     position: 'relative',
   },
   mainFeed: {
@@ -669,17 +671,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surface,
-  },
-  partnerPiP: {
-    position: 'absolute',
-    width: PIP_WIDTH,
-    height: PIP_HEIGHT,
-    borderRadius: borderRadius.md,
-    overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    zIndex: 10,
-    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null),
   },
   partnerPiPFeed: {
     flex: 1,
@@ -717,38 +708,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
-  feedBadge: {
-    position: 'absolute',
-    top: spacing.md,
-    left: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.full,
-  },
-  feedBadgeCompact: {
-    top: spacing.xs,
-    left: spacing.xs,
-    paddingHorizontal: 6,
-  },
-  feedDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.textMuted,
-  },
-  feedDotLive: {
-    backgroundColor: colors.success,
-  },
-  feedBadgeText: {
-    ...typography.caption,
-    fontSize: 11,
-    color: colors.text,
-    fontWeight: '600',
-  },
   stageTopBar: {
     position: 'absolute',
     top: spacing.sm,
@@ -772,47 +731,21 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: borderRadius.full,
   },
-  stageChipActive: {
-    borderWidth: 1,
-    borderColor: colors.sparkOrange,
-  },
   stageChipText: {
     ...typography.caption,
     fontSize: 11,
     color: colors.text,
     fontWeight: '600',
   },
-  stageStatusChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
-    borderRadius: borderRadius.full,
-    marginLeft: 'auto',
-  },
-  stageStatusText: {
-    ...typography.caption,
-    fontSize: 11,
-    color: colors.textSecondary,
-  },
-  expandedEffectsBar: {
-    position: 'absolute',
-    bottom: 58,
-    left: spacing.sm,
-    right: spacing.sm,
-    zIndex: 25,
-  },
   stageControls: {
     position: 'absolute',
     bottom: spacing.lg,
-    left: 0,
-    right: 0,
+    left: spacing.md,
+    right: spacing.md,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: spacing.lg,
+    gap: spacing.xl,
     zIndex: 20,
   },
   overlayBtn: {
@@ -833,55 +766,74 @@ const styles = StyleSheet.create({
   overlayBtnPressed: {
     opacity: 0.85,
   },
-  stageHint: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.md,
-    lineHeight: 18,
+  footerActions: {
+    width: '100%',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
   },
   confirmCard: {
+    width: '100%',
+    maxWidth: 320,
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: spacing.md,
-    width: '100%',
+    ...cardShadow('md'),
   },
   confirmTitle: {
-    ...typography.body,
-    fontWeight: '700',
+    ...typography.subtitle,
     color: colors.text,
-    marginBottom: spacing.xs,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   confirmText: {
-    ...typography.caption,
+    ...typography.bodySmall,
     color: colors.textSecondary,
-    lineHeight: 18,
-    marginBottom: spacing.md,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: spacing.lg,
   },
   confirmActions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    justifyContent: 'flex-end',
   },
-  safety: {
+  confirmBtn: {
+    flex: 1,
+  },
+  safetyLinks: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.surfaceAlt,
-    padding: spacing.sm,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.md,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: colors.border,
+    justifyContent: 'center',
+    gap: spacing.md,
   },
-  safetyText: {
+  safetyLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null),
+  },
+  safetyLinkPressed: {
+    opacity: 0.75,
+  },
+  safetyLinkText: {
     ...typography.caption,
-    color: colors.textSecondary,
-    flex: 1,
-    lineHeight: 18,
+    color: colors.error,
+    fontWeight: '600',
+  },
+  safetyLinkDivider: {
+    width: 1,
+    height: 14,
+    backgroundColor: colors.border,
   },
 });

@@ -21,26 +21,29 @@ import {
   ScreenContainer,
 } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
-import { MOCK_MATCHES, MOCK_MESSAGES } from '../data/mockMessages';
 import { useAuth } from '../context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { useMessagesBackend } from '../hooks/useMessagesBackend';
 import { isSupabaseConfigured, reportUser } from '../services';
 import { formatAuthErrorForUser } from '../utils/authErrors';
-import type { Match, Message } from '../types';
+import type { Message } from '../types';
 import type { MessagesScreenProps } from '../navigation/types';
-import { getMessageThreadMeta, groupMessagesByMatch } from '../utils/messageThread';
+import { getMessageThreadMeta, isEmptyMatchThread } from '../utils/messageThread';
 
 export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
   const { session } = useAuth();
-  const { currentUser, blockUser, isBlocked } = useApp();
+  const {
+    currentUser,
+    blockUser,
+    isBlocked,
+    demoMatches,
+    demoMessagesByMatch,
+    removeDemoMatch,
+    sendDemoMessage,
+  } = useApp();
   const initialMatchId = route.params?.matchId;
   const userId = session?.user?.id ?? currentUser.id;
 
-  const [mockMatches, setMockMatches] = useState<Match[]>(MOCK_MATCHES);
-  const [mockMessagesByMatch, setMockMessagesByMatch] = useState<Record<string, Message[]>>(() =>
-    groupMessagesByMatch(MOCK_MESSAGES),
-  );
   const [lastReadAt, setLastReadAt] = useState<Record<string, string>>({});
   const [activeMatchId, setActiveMatchId] = useState<string | null>(initialMatchId ?? null);
   const [showMatchList, setShowMatchList] = useState(!initialMatchId);
@@ -53,8 +56,8 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const backend = useMessagesBackend(userId, activeMatchId, initialMatchId);
-  const matches = backend.useBackend ? backend.matches : mockMatches;
-  const messagesByMatch = backend.useBackend ? backend.messagesByMatch : mockMessagesByMatch;
+  const matches = backend.useBackend ? backend.matches : demoMatches;
+  const messagesByMatch = backend.useBackend ? backend.messagesByMatch : demoMessagesByMatch;
 
   useEffect(() => {
     if (backend.error) {
@@ -122,10 +125,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
       sentAt,
     };
 
-    setMockMessagesByMatch((prev) => ({
-      ...prev,
-      [activeMatch.id]: [...(prev[activeMatch.id] ?? []), newMessage],
-    }));
+    sendDemoMessage(activeMatch.id, newMessage);
     setLastReadAt((prev) => ({ ...prev, [activeMatch.id]: sentAt }));
     setDraft('');
   };
@@ -197,12 +197,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
     if (backend.useBackend) {
       backend.removeMatchLocally(activeMatch.id);
     } else {
-      setMockMatches((prev) => prev.filter((m) => m.id !== activeMatch.id));
-      setMockMessagesByMatch((prev) => {
-        const next = { ...prev };
-        delete next[activeMatch.id];
-        return next;
-      });
+      removeDemoMatch(activeMatch.id);
     }
     setActiveMatchId(null);
     setShowMatchList(true);
@@ -236,12 +231,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
     if (backend.useBackend) {
       backend.removeMatchLocally(activeMatch.id);
     } else {
-      setMockMatches((prev) => prev.filter((m) => m.id !== activeMatch.id));
-      setMockMessagesByMatch((prev) => {
-        const next = { ...prev };
-        delete next[activeMatch.id];
-        return next;
-      });
+      removeDemoMatch(activeMatch.id);
     }
     setActiveMatchId(null);
     setShowMatchList(true);
@@ -250,7 +240,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
 
   if (!showChat || !activeMatch) {
     return (
-      <ScreenContainer contentStyle={styles.content}>
+      <ScreenContainer fullBleed contentStyle={styles.listContent}>
         <View style={styles.header}>
           <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
             <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -270,6 +260,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
         ) : null}
 
         <FlatList
+          style={styles.matchList}
           data={visibleMatches}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
@@ -287,7 +278,7 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
               <Ionicons name="chatbubbles-outline" size={48} color={colors.textMuted} />
               <Text style={styles.emptyText}>No matches yet</Text>
               <Text style={styles.emptySub}>
-                Complete a speed date and match mutually to start messaging
+                Match on a speed date and your conversation will show up here
               </Text>
             </View>
           }
@@ -303,9 +294,10 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
   }
 
   const partnerPhoto = activeMatch.user.photos.find(Boolean);
+  const threadIsEmpty = isEmptyMatchThread(messages, activeMatch);
 
   return (
-    <ScreenContainer style={styles.chatContainer}>
+    <ScreenContainer fullBleed style={styles.chatContainer} keyboardAvoiding={false}>
       <KeyboardAvoidingView
         style={styles.chatWrapper}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -377,21 +369,34 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
         ) : null}
 
         <FlatList
+          style={styles.messageListScroll}
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <MessageBubble message={item} isOwn={item.senderId === currentUser.id} />
           )}
           contentContainerStyle={styles.messageList}
+          ListEmptyComponent={
+            threadIsEmpty ? (
+              <View style={styles.emptyThread}>
+                <Text style={styles.emptyThreadTitle}>New match</Text>
+                <Text style={styles.emptyThreadSub}>
+                  No messages yet — say hi whenever you are ready.
+                </Text>
+              </View>
+            ) : null
+          }
         />
 
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
             placeholder={
-              threadMeta?.turn === 'yours'
-                ? `${activeMatch.user.name} is waiting — say something…`
-                : 'Type a message...'
+              threadIsEmpty
+                ? 'Say hi…'
+                : threadMeta?.turn === 'yours'
+                  ? `${activeMatch.user.name} is waiting — say something…`
+                  : 'Type a message...'
             }
             placeholderTextColor={colors.textMuted}
             value={draft}
@@ -483,15 +488,16 @@ export function MessagesScreen({ navigation, route }: MessagesScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  content: {
-    paddingTop: spacing.sm,
+  listContent: {
     flex: 1,
+    paddingTop: spacing.sm,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+    paddingHorizontal: spacing.lg,
   },
   iconBtn: {
     width: 40,
@@ -511,13 +517,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.successLight,
     borderRadius: borderRadius.md,
     padding: spacing.sm,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+    marginHorizontal: spacing.lg,
     borderWidth: 1,
     borderColor: colors.success,
   },
   noticeText: {
     ...typography.bodySmall,
     color: colors.text,
+    flex: 1,
+  },
+  matchList: {
     flex: 1,
   },
   empty: {
@@ -537,18 +547,20 @@ const styles = StyleSheet.create({
   },
   chatContainer: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   chatWrapper: {
     flex: 1,
+    backgroundColor: colors.background,
   },
   chatHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.sm,
-    borderBottomWidth: 1,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     gap: spacing.xs,
   },
   chatHeaderMain: {
@@ -618,25 +630,52 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textMuted,
   },
+  messageListScroll: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
   messageList: {
     padding: spacing.md,
     paddingHorizontal: spacing.lg,
     flexGrow: 1,
+  },
+  emptyThread: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing.xxl,
+    paddingHorizontal: spacing.xl,
+    gap: spacing.xs,
+  },
+  emptyThreadTitle: {
+    ...typography.bodySmall,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  emptyThreadSub: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     padding: spacing.md,
     paddingHorizontal: spacing.lg,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.border,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     gap: spacing.sm,
   },
   input: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
     borderRadius: borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     maxHeight: 100,

@@ -38,13 +38,28 @@
         }
       ],
       "@config-plugins/react-native-webrtc",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#FF6B35"
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.speedspark.app"
+      "bundleIdentifier": "com.speedspark.app",
+      "bitcode": false,
+      "entitlements": {
+        "aps-environment": "development"
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSUserNotificationsUsageDescription": "SpeedSpark sends notifications for new messages, matches, and when speed date windows go live."
+      }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "package": "com.speedspark.app",
       "adaptiveIcon": {
         "backgroundColor": "#0F0F0F",
@@ -52,11 +67,28 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "backgroundColor": "#0F0F0F"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "9b973426-224c-4392-a7ce-c46d2e016eba"
+      }
     }
   }
 }

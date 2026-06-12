@@ -6,11 +6,19 @@ interface SectionHeaderProps {
   title: string;
   hint?: string;
   error?: string;
+  dense?: boolean;
+  first?: boolean;
 }
 
-export function SectionHeader({ title, hint, error }: SectionHeaderProps) {
+export function SectionHeader({ title, hint, error, dense = false, first = false }: SectionHeaderProps) {
   return (
-    <View style={styles.container}>
+    <View
+      style={[
+        styles.container,
+        dense && styles.dense,
+        dense && first && styles.denseFirst,
+      ]}
+    >
       <Text style={[styles.title, error ? styles.titleError : null]}>{title}</Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {hint && !error ? <Text style={styles.hint}>{hint}</Text> : null}
@@ -22,6 +30,13 @@ const styles = StyleSheet.create({
   container: {
     marginTop: spacing.md,
     marginBottom: spacing.sm,
+  },
+  dense: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  denseFirst: {
+    marginTop: 0,
   },
   title: {
     ...typography.bodySmall,
@@ -41,6 +56,7 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.error,
     marginTop: spacing.xs,
+    marginBottom: spacing.xs,
     lineHeight: 18,
   },
 });

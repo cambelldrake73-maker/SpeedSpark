@@ -5,19 +5,17 @@ import { borderRadius, colors, spacing, typography } from '../constants/theme';
 interface ProgressBarProps {
   currentStep: number;
   totalSteps: number;
-  label?: string;
+  dense?: boolean;
 }
 
-export function ProgressBar({ currentStep, totalSteps, label }: ProgressBarProps) {
+export function ProgressBar({ currentStep, totalSteps, dense = false }: ProgressBarProps) {
   const progress = (currentStep / totalSteps) * 100;
 
   return (
-    <View style={styles.container}>
-      {label && (
-        <Text style={styles.label}>
-          {label} · Step {currentStep} of {totalSteps}
-        </Text>
-      )}
+    <View style={[styles.container, dense && styles.denseContainer]}>
+      <Text style={styles.label}>
+        Step {currentStep} of {totalSteps}
+      </Text>
       <View style={styles.track}>
         <View style={[styles.fill, { width: `${progress}%` }]} />
       </View>
@@ -28,6 +26,9 @@ export function ProgressBar({ currentStep, totalSteps, label }: ProgressBarProps
 const styles = StyleSheet.create({
   container: {
     marginBottom: spacing.lg,
+  },
+  denseContainer: {
+    marginBottom: spacing.sm,
   },
   label: {
     ...typography.caption,

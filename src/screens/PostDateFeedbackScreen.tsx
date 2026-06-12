@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, DatingProfileCard, ScaleRating, ScreenContainer, SelectableOption } from '../components';
-import { COPY } from '../constants/options';
-import { colors, spacing, typography } from '../constants/theme';
+import { Button, DatingProfileCard, ScaleRating, ScreenContainer } from '../components';
+import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { MOCK_PARTNER } from '../data/mockUsers';
 import { useAuth } from '../context/AuthContext';
 import { simulatePartnerFeedback, useApp } from '../context/AppContext';
@@ -15,9 +14,9 @@ import type { PostDateFeedbackScreenProps } from '../navigation/types';
 export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackScreenProps) {
   const { partnerId, dateId } = route.params;
   const { session } = useAuth();
-  const { currentUser, setLastFeedback, setPartnerFeedback, currentDatePartner } = useApp();
+  const { currentUser, setLastFeedback, setPartnerFeedback, currentDatePartner, registerDemoMatch } =
+    useApp();
   const partner = currentDatePartner ?? MOCK_PARTNER;
-  const partnerName = partner.name;
   const userId = session?.user?.id ?? currentUser.id;
   const useBackend = isBackendSpeedDateId(dateId) && Boolean(userId);
 
@@ -27,6 +26,10 @@ export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackSc
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const canSubmit = attractivenessRating > 0 && wantToMatch !== null;
+
+  const finishFeedback = () => {
+    navigation.replace('DateQueue');
+  };
 
   const handleSubmit = async () => {
     if (!canSubmit || isSubmitting) return;
@@ -59,7 +62,7 @@ export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackSc
           setPartnerFeedback(null);
         }
 
-        navigation.replace('MatchResult', { partnerId, dateId });
+        finishFeedback();
       } catch (error) {
         setSubmitError(formatAuthErrorForUser(error));
       } finally {
@@ -75,122 +78,195 @@ export function PostDateFeedbackScreen({ navigation, route }: PostDateFeedbackSc
       wouldTalkAgain: wantToMatch === true,
     };
 
+    const partnerFeedbackResult = simulatePartnerFeedback(dateId, partnerId);
+
     setLastFeedback(feedback);
-    setPartnerFeedback(simulatePartnerFeedback(dateId, partnerId));
-    navigation.replace('MatchResult', { partnerId, dateId });
+    setPartnerFeedback(partnerFeedbackResult);
+
+    if (wantToMatch === true && partnerFeedbackResult.wouldTalkAgain) {
+      registerDemoMatch(partner);
+    }
+
+    finishFeedback();
   };
 
   return (
-    <ScreenContainer scroll contentStyle={styles.content}>
-      <Text style={styles.title}>How was your date?</Text>
-      <Text style={styles.subtitle}>
-        Here's who you just talked to. Your rating and match choice stay private — {partnerName}{' '}
-        won't see them.
-      </Text>
-
-      <View style={styles.profileReveal}>
-        <DatingProfileCard user={partner} />
+    <ScreenContainer scroll={true} contentStyle={styles.content}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Do you want to match with your date?</Text>
       </View>
 
-      <View style={styles.ratingCard}>
-        <ScaleRating
-          label="How would you rate this person on attractiveness?"
-          hint="1 = not attracted · 10 = very attracted"
-          value={attractivenessRating}
-          onChange={setAttractivenessRating}
-          min={1}
-          max={10}
+      <DatingProfileCard user={partner} variant="compact" />
+
+      <View style={styles.feedbackPanel}>
+        <View style={styles.feedbackSection}>
+          <Text style={styles.stepLabel}>Attraction</Text>
+          <ScaleRating
+            label="How attracted to this person were you?"
+            hint="1 = not attracted · 10 = very attracted"
+            value={attractivenessRating}
+            onChange={setAttractivenessRating}
+            min={1}
+            max={10}
+            compact
+          />
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.feedbackSection}>
+          <View style={styles.matchChoices}>
+            <Pressable
+              onPress={() => setWantToMatch(true)}
+              style={({ pressed }) => [
+                styles.matchChoice,
+                wantToMatch === true && styles.matchChoiceSelected,
+                pressed && styles.matchChoicePressed,
+              ]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: wantToMatch === true }}
+            >
+              <Ionicons
+                name="heart"
+                size={20}
+                color={wantToMatch === true ? colors.sparkOrange : colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.matchChoiceText,
+                  wantToMatch === true && styles.matchChoiceTextSelected,
+                ]}
+              >
+                Match
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setWantToMatch(false)}
+              style={({ pressed }) => [
+                styles.matchChoice,
+                wantToMatch === false && styles.matchChoiceSelected,
+                pressed && styles.matchChoicePressed,
+              ]}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: wantToMatch === false }}
+            >
+              <Ionicons
+                name="close"
+                size={20}
+                color={wantToMatch === false ? colors.sparkOrange : colors.textMuted}
+              />
+              <Text
+                style={[
+                  styles.matchChoiceText,
+                  wantToMatch === false && styles.matchChoiceTextSelected,
+                ]}
+              >
+                No match
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.footer}>
+        <View style={styles.privacyNote}>
+          <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
+          <Text style={styles.privacyText}>
+            Ratings never appear on profiles or get shared with your date.
+          </Text>
+        </View>
+
+        {submitError ? <Text style={styles.submitError}>{submitError}</Text> : null}
+
+        <Button
+          title="Submit"
+          onPress={() => void handleSubmit()}
+          size="lg"
+          disabled={!canSubmit || isSubmitting}
+          loading={isSubmitting}
         />
       </View>
-
-      <View style={styles.matchCard}>
-        <Text style={styles.matchTitle}>Would you like to match with {partnerName}?</Text>
-        <Text style={styles.matchHint}>
-          A match only happens if you both say yes. This is separate from your attractiveness
-          rating.
-        </Text>
-        <SelectableOption
-          selected={wantToMatch === true}
-          onPress={() => setWantToMatch(true)}
-          icon="heart"
-          title="Yes — I'd like to match"
-          description="You're open to messaging and seeing where it goes."
-        />
-        <SelectableOption
-          selected={wantToMatch === false}
-          onPress={() => setWantToMatch(false)}
-          icon="close-circle-outline"
-          title="No thanks"
-          description="Not interested in matching right now — totally fine."
-        />
-      </View>
-
-      <View style={styles.privacyNote}>
-        <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
-        <Text style={styles.privacyText}>{COPY.sparkPrivate}</Text>
-      </View>
-
-      {submitError ? <Text style={styles.submitError}>{submitError}</Text> : null}
-
-      <Button
-        title="Submit"
-        onPress={() => void handleSubmit()}
-        size="lg"
-        disabled={!canSubmit || isSubmitting}
-        loading={isSubmitting}
-        style={styles.submitBtn}
-      />
     </ScreenContainer>
   );
 }
 
 const styles = StyleSheet.create({
   content: {
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  header: {
+    marginBottom: spacing.md,
   },
   title: {
     ...typography.title,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-    lineHeight: 24,
-  },
-  profileReveal: {
-    marginBottom: spacing.lg,
-  },
-  ratingCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.lg,
-  },
-  matchCard: {
-    marginBottom: spacing.lg,
-  },
-  matchTitle: {
-    ...typography.body,
-    fontWeight: '700',
+    fontSize: 26,
     color: colors.text,
     marginBottom: spacing.xs,
   },
-  matchHint: {
+  feedbackPanel: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  feedbackSection: {
+    gap: spacing.xs,
+  },
+  stepLabel: {
     ...typography.caption,
-    color: colors.textMuted,
-    lineHeight: 18,
-    marginBottom: spacing.sm,
+    fontWeight: '700',
+    color: colors.sparkOrange,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: spacing.xs,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+  },
+  matchChoices: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  matchChoice: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  matchChoiceSelected: {
+    borderColor: colors.sparkOrange,
+    backgroundColor: colors.accentLight,
+  },
+  matchChoicePressed: {
+    opacity: 0.9,
+  },
+  matchChoiceText: {
+    ...typography.body,
+    fontWeight: '700',
+    color: colors.textSecondary,
+  },
+  matchChoiceTextSelected: {
+    color: colors.text,
+  },
+  footer: {
+    gap: spacing.sm,
   },
   privacyNote: {
     flexDirection: 'row',
     gap: spacing.sm,
     alignItems: 'flex-start',
-    marginBottom: spacing.lg,
   },
   privacyText: {
     ...typography.caption,
@@ -198,13 +274,9 @@ const styles = StyleSheet.create({
     flex: 1,
     lineHeight: 18,
   },
-  submitBtn: {
-    marginBottom: spacing.xl,
-  },
   submitError: {
     ...typography.caption,
     color: colors.error,
-    marginBottom: spacing.sm,
     lineHeight: 18,
   },
 });

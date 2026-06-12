@@ -16,7 +16,6 @@ const styles = StyleSheet.create({
   error: {
     ...typography.caption,
     color: colors.error,
-    marginTop: spacing.xs,
     marginBottom: spacing.sm,
     lineHeight: 18,
   },

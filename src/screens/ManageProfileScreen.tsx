@@ -15,10 +15,11 @@ import {
 } from '../components';
 import {
   GENDER_OPTIONS,
-  LIFESTYLE_TAG_OPTIONS,
+  LIFESTYLE_TAG_MAX,
   LOOKING_FOR_OPTIONS,
   ORIENTATION_OPTIONS,
-  PERSONALITY_TAGS,
+  LIFESTYLE_TAG_OPTIONS,
+  normalizeLifestyleTags,
   PRESENTATION_OPTIONS,
 } from '../constants/options';
 import { colors, spacing, typography } from '../constants/theme';
@@ -27,12 +28,7 @@ import { useApp } from '../context/AppContext';
 import { syncProfilePhotoSlots } from '../services/profilePhotos';
 import { isSupabaseConfigured } from '../services/supabaseEnv';
 import { formatAuthErrorForUser } from '../utils/authErrors';
-import type {
-  GenderIdentity,
-  LookingFor,
-  PresentationTag,
-  SexualOrientation,
-} from '../types';
+import type { GenderIdentity, LookingFor, PresentationTag, SexualOrientation } from '../types';
 import type { ManageProfileScreenProps } from '../navigation/types';
 import {
   inchesToFeetInches,
@@ -75,12 +71,15 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
   const [sexualOrientation, setSexualOrientation] = useState<SexualOrientation>(
     profile.sexualOrientation ?? 'prefer_not_to_say',
   );
-  const [lookingFor, setLookingFor] = useState<LookingFor[]>(profile.lookingFor ?? []);
+  const [datingIntentions, setDatingIntentions] = useState<LookingFor[]>(
+    profile.datingIntentions ?? [],
+  );
   const [presentationTags, setPresentationTags] = useState<PresentationTag[]>(
     profile.presentationTags ?? [],
   );
-  const [personalityTags, setPersonalityTags] = useState<string[]>(profile.personalityTags ?? []);
-  const [lifestyleTags, setLifestyleTags] = useState<string[]>(profile.lifestyleTags ?? []);
+  const [lifestyleTags, setLifestyleTags] = useState<string[]>(() =>
+    normalizeLifestyleTags(profile.lifestyleTags, profile.personalityTags),
+  );
   const [photos, setPhotos] = useState<string[]>(() =>
     Array.from({ length: MAX_PHOTOS }, (_, i) => profile.photos?.[i] ?? ''),
   );
@@ -97,9 +96,11 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
     if (!deviceLocation) errors.push('Set your location');
     const heightError = validateFeetInchesFields(heightFeet, heightInches);
     if (heightError) errors.push(heightError);
-    if (lookingFor.length === 0) errors.push('Select at least one "Looking for" option');
+    if (datingIntentions.length === 0) {
+      errors.push('Select at least one dating intention');
+    }
     return errors;
-  }, [photos, name, age, deviceLocation, heightFeet, heightInches, lookingFor]);
+  }, [photos, name, age, deviceLocation, heightFeet, heightInches, datingIntentions]);
 
   const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -121,9 +122,9 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
       heightInches: parsedHeight,
       genderIdentity,
       sexualOrientation,
-      lookingFor,
+      datingIntentions,
       presentationTags,
-      personalityTags,
+      personalityTags: [],
       lifestyleTags,
     };
 
@@ -150,7 +151,7 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
   };
 
   return (
-    <ScreenContainer scroll contentStyle={styles.content}>
+    <ScreenContainer scroll={true} contentStyle={styles.content}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -164,7 +165,9 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
       </Text>
 
       <SectionHeader title="Photos" hint={`At least ${REQUIRED_PHOTOS} photos required`} />
-      <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
+      <View style={styles.photosSection}>
+        <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
+      </View>
 
       <SectionHeader title="Basics" />
       <Input label="Name" value={name} onChangeText={setName} placeholder="Display name" />
@@ -192,7 +195,7 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
         multiSelect={false}
       />
 
-      <SectionHeader title="Sexual orientation" />
+      <SectionHeader title="Orientation" hint="How you identify — used for thoughtful matching" />
       <TagSelector
         options={ORIENTATION_OPTIONS}
         selected={[sexualOrientation]}
@@ -200,34 +203,32 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
         multiSelect={false}
       />
 
-      <SectionHeader title="Looking for" />
+      <SectionHeader
+        title="Dating intentions"
+        hint="Select all that apply — what are you hoping to find here?"
+      />
       <TagSelector
         options={LOOKING_FOR_OPTIONS}
-        selected={lookingFor}
-        onToggle={(v) => toggle(lookingFor, v, setLookingFor)}
+        selected={datingIntentions}
+        onToggle={(v) => toggle(datingIntentions, v, setDatingIntentions)}
       />
 
-      <SectionHeader title="Presentation" />
+      <SectionHeader
+        title="Presentation"
+        hint="Masculine, feminine, androgynous, and more — pick what fits how you show up"
+      />
       <TagSelector
         options={PRESENTATION_OPTIONS}
         selected={presentationTags}
         onToggle={(v) => toggle(presentationTags, v, setPresentationTags)}
       />
 
-      <SectionHeader title="Vibe & personality" hint="Pick up to 6 tags" />
-      <ChipGrid
-        options={PERSONALITY_TAGS}
-        selected={personalityTags}
-        onToggle={(tag) => toggle(personalityTags, tag, setPersonalityTags)}
-        maxSelect={6}
-      />
-
-      <SectionHeader title="Lifestyle & values" hint="Pick up to 6 tags" />
+      <SectionHeader title="Lifestyle & values" hint="Pick up to 5 tags" />
       <ChipGrid
         options={LIFESTYLE_TAG_OPTIONS}
         selected={lifestyleTags}
         onToggle={(tag) => toggle(lifestyleTags, tag, setLifestyleTags)}
-        maxSelect={6}
+        maxSelect={LIFESTYLE_TAG_MAX}
       />
 
       <FormErrorBanner
@@ -248,7 +249,7 @@ export function ManageProfileScreen({ navigation }: ManageProfileScreenProps) {
 const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.md,
-    paddingBottom: spacing.xxl,
+    paddingBottom: spacing.xxl * 2,
   },
   header: {
     flexDirection: 'row',
@@ -272,6 +273,10 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 22,
     marginBottom: spacing.lg,
+  },
+  photosSection: {
+    width: '100%',
+    marginBottom: spacing.sm,
   },
   btn: {
     marginTop: spacing.lg,

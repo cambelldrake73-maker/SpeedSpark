@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -8,10 +8,14 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
+import { cardShadow } from '../utils/platformStyles';
 import { pickProfilePhotoFromSource, type PhotoSource } from '../utils/pickProfilePhoto';
+import { PhotoCropPreview } from './PhotoCropPreview';
 
 interface PhotoPickerPlaceholderProps {
   photos: string[];
@@ -19,13 +23,38 @@ interface PhotoPickerPlaceholderProps {
   maxPhotos?: number;
 }
 
+interface PendingPreview {
+  uri: string;
+  index: number;
+}
+
+const PHOTO_COLUMNS = 3;
+const PHOTO_SLOT_GAP = spacing.sm;
+const PHOTO_SLOT_ASPECT = 3 / 4;
+
 export function PhotoPickerPlaceholder({
   photos,
   onPhotosChange,
   maxPhotos = 6,
 }: PhotoPickerPlaceholderProps) {
+  const insets = useSafeAreaInsets();
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [pendingPreview, setPendingPreview] = useState<PendingPreview | null>(null);
   const [loading, setLoading] = useState(false);
+  const [gridWidth, setGridWidth] = useState(0);
+
+  const slotWidth =
+    gridWidth > 0
+      ? (gridWidth - PHOTO_SLOT_GAP * (PHOTO_COLUMNS - 1)) / PHOTO_COLUMNS
+      : 0;
+  const slotHeight = slotWidth > 0 ? slotWidth / PHOTO_SLOT_ASPECT : 0;
+
+  const handleGridLayout = useCallback((event: LayoutChangeEvent) => {
+    const width = event.nativeEvent.layout.width;
+    if (width > 0) {
+      setGridWidth(width);
+    }
+  }, []);
 
   const slots = Array.from({ length: maxPhotos }, (_, i) => photos[i] ?? null);
 
@@ -35,16 +64,20 @@ export function PhotoPickerPlaceholder({
     onPhotosChange(next);
   };
 
-  const closePicker = () => {
+  const closeSourcePicker = () => {
     if (!loading) setActiveIndex(null);
   };
 
+  const slotLabel = (index: number) => (index === 0 ? 'Main photo' : `Photo ${index + 1}`);
+
   const handlePickDirect = async (index: number, source: PhotoSource) => {
     setLoading(true);
+    setActiveIndex(null);
     const uri = await pickProfilePhotoFromSource(source);
     setLoading(false);
-    setActiveIndex(null);
-    if (uri) setPhotoAt(index, uri);
+    if (uri) {
+      setPendingPreview({ uri, index });
+    }
   };
 
   const handleSourceSelect = (source: PhotoSource) => {
@@ -57,21 +90,32 @@ export function PhotoPickerPlaceholder({
     setActiveIndex(index);
   };
 
-  const slotLabel =
-    activeIndex === null
-      ? ''
-      : activeIndex === 0
-        ? 'Main photo'
-        : `Photo ${activeIndex + 1}`;
+  const confirmPreview = (croppedUri: string) => {
+    if (!pendingPreview) return;
+    setPhotoAt(pendingPreview.index, croppedUri);
+    setPendingPreview(null);
+  };
+
+  const retryPreview = () => {
+    if (!pendingPreview) return;
+    const index = pendingPreview.index;
+    setPendingPreview(null);
+    setActiveIndex(index);
+  };
+
+  const closePreview = () => {
+    setPendingPreview(null);
+  };
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.container}>
+      <View style={styles.container} onLayout={handleGridLayout}>
         {slots.map((photo, index) => (
           <Pressable
             key={index}
             style={({ pressed }) => [
               styles.slot,
+              slotWidth > 0 ? { width: slotWidth, height: slotHeight } : styles.slotSizingFallback,
               activeIndex === index && styles.slotActive,
               pressed && styles.slotPressed,
               Platform.OS === 'web' ? styles.slotWeb : null,
@@ -106,44 +150,81 @@ export function PhotoPickerPlaceholder({
       {loading && (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={colors.sparkOrange} />
-          <Text style={styles.loadingText}>Opening…</Text>
+          <Text style={styles.loadingText}>Opening your photos…</Text>
         </View>
       )}
 
       <Modal
         visible={activeIndex !== null && !loading}
         transparent
-        animationType="fade"
-        onRequestClose={closePicker}
+        animationType="slide"
+        onRequestClose={closeSourcePicker}
       >
         <View style={styles.modalRoot}>
-          <Pressable style={styles.backdrop} onPress={closePicker} accessibilityLabel="Close" />
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>{slotLabel}</Text>
-            <Text style={styles.sheetSubtitle}>Choose how to add your photo</Text>
+          <Pressable style={styles.backdrop} onPress={closeSourcePicker} accessibilityLabel="Close" />
+          <View style={[styles.sourceSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>
+              {activeIndex === null ? '' : slotLabel(activeIndex)}
+            </Text>
+            <Text style={styles.sheetSubtitle}>Add a clear photo of you — face visible works best</Text>
 
             <Pressable
-              style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+              style={({ pressed }) => [styles.sourceOption, pressed && styles.sourceOptionPressed]}
               onPress={() => handleSourceSelect('library')}
             >
-              <Ionicons name="images-outline" size={22} color={colors.sparkOrange} />
-              <Text style={styles.sheetOptionText}>Upload</Text>
+              <View style={styles.sourceIconWrap}>
+                <Ionicons name="images-outline" size={22} color={colors.sparkOrange} />
+              </View>
+              <View style={styles.sourceCopy}>
+                <Text style={styles.sourceOptionTitle}>Photo library</Text>
+                <Text style={styles.sourceOptionHint}>Choose from your camera roll</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </Pressable>
 
             <Pressable
-              style={({ pressed }) => [styles.sheetOption, pressed && styles.sheetOptionPressed]}
+              style={({ pressed }) => [styles.sourceOption, pressed && styles.sourceOptionPressed]}
               onPress={() => handleSourceSelect('camera')}
             >
-              <Ionicons name="camera-outline" size={22} color={colors.sparkOrange} />
-              <Text style={styles.sheetOptionText}>Use camera</Text>
+              <View style={styles.sourceIconWrap}>
+                <Ionicons name="camera-outline" size={22} color={colors.sparkOrange} />
+              </View>
+              <View style={styles.sourceCopy}>
+                <Text style={styles.sourceOptionTitle}>Take a photo</Text>
+                <Text style={styles.sourceOptionHint}>Use your camera now</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
             </Pressable>
 
             <Pressable
-              style={({ pressed }) => [styles.sheetCancel, pressed && styles.sheetOptionPressed]}
-              onPress={closePicker}
+              style={({ pressed }) => [styles.sheetCancel, pressed && styles.sourceOptionPressed]}
+              onPress={closeSourcePicker}
             >
               <Text style={styles.sheetCancelText}>Cancel</Text>
             </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={pendingPreview !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closePreview}
+      >
+        <View style={[styles.previewRoot, { paddingTop: insets.top + spacing.md }]}>
+          <Pressable style={styles.backdrop} onPress={closePreview} accessibilityLabel="Close preview" />
+
+          <View style={styles.previewCard}>
+            {pendingPreview ? (
+              <PhotoCropPreview
+                uri={pendingPreview.uri}
+                onConfirm={confirmPreview}
+                onRetry={retryPreview}
+                onCancel={closePreview}
+              />
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -153,22 +234,26 @@ export function PhotoPickerPlaceholder({
 
 const styles = StyleSheet.create({
   wrap: {
-    gap: spacing.sm,
+    width: '100%',
+    marginBottom: spacing.md,
   },
   container: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm,
+    gap: PHOTO_SLOT_GAP,
+    width: '100%',
   },
   slot: {
-    width: '31.5%',
-    aspectRatio: 3 / 4,
     borderRadius: borderRadius.md,
     borderWidth: 1.5,
     borderColor: colors.border,
     borderStyle: 'dashed',
     overflow: 'hidden',
     backgroundColor: colors.surface,
+  },
+  slotSizingFallback: {
+    width: '31%',
+    aspectRatio: PHOTO_SLOT_ASPECT,
   },
   slotActive: {
     borderColor: colors.sparkOrange,
@@ -233,27 +318,40 @@ const styles = StyleSheet.create({
   },
   modalRoot: {
     flex: 1,
+    justifyContent: 'flex-end',
+  },
+  previewRoot: {
+    flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   backdrop: {
     ...StyleSheet.absoluteFill,
     backgroundColor: colors.overlay,
   },
-  sheet: {
-    width: '100%',
-    maxWidth: 320,
+  sourceSheet: {
     backgroundColor: colors.surfaceAlt,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     borderWidth: 1,
+    borderBottomWidth: 0,
     borderColor: colors.border,
     gap: spacing.sm,
+    ...cardShadow('md'),
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.border,
+    marginBottom: spacing.sm,
   },
   sheetTitle: {
-    ...typography.body,
-    fontWeight: '700',
+    ...typography.subtitle,
     color: colors.text,
     textAlign: 'center',
   },
@@ -261,34 +359,55 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.textSecondary,
     textAlign: 'center',
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
+    lineHeight: 18,
   },
-  sheetOption: {
+  sourceOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
+    gap: spacing.md,
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.md,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  sheetOptionPressed: {
-    opacity: 0.85,
+  sourceOptionPressed: {
+    opacity: 0.88,
   },
-  sheetOptionText: {
+  sourceIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accentLight,
+  },
+  sourceCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  sourceOptionTitle: {
     ...typography.body,
     fontWeight: '600',
     color: colors.text,
   },
+  sourceOptionHint: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
   sheetCancel: {
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     marginTop: spacing.xs,
   },
   sheetCancelText: {
     ...typography.body,
-    color: colors.textMuted,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  previewCard: {
+    width: '100%',
   },
 });

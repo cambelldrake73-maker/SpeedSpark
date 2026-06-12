@@ -1,4 +1,5 @@
 import { normalizeMatchingPriorityOrder } from '../constants/matchingPriorities';
+import { normalizeLifestyleTags, normalizePresentationTags } from '../constants/options';
 import type {
   DatingPreferences,
   GenderIdentity,
@@ -35,11 +36,12 @@ function mapProfileRow(row: ProfileRow, photos: string[] = []): UserProfile {
     photos,
     genderIdentity: row.gender_identity as GenderIdentity,
     sexualOrientation: row.sexual_orientation as SexualOrientation,
-    lookingFor: row.looking_for as LookingFor[],
+    datingIntentions: (row.dating_intentions ?? []) as LookingFor[],
+    interestedInGenders: row.looking_for as GenderIdentity[],
     queerRoles: row.queer_roles as QueerRole[],
-    presentationTags: row.presentation_tags as PresentationTag[],
-    personalityTags: row.personality_tags,
-    lifestyleTags: row.lifestyle_tags,
+    presentationTags: normalizePresentationTags(row.presentation_tags),
+    personalityTags: [],
+    lifestyleTags: normalizeLifestyleTags(row.lifestyle_tags, row.personality_tags),
     verificationStatus: row.verification_status as VerificationStatus,
   };
 }
@@ -52,11 +54,9 @@ function mapPreferencesRow(row: DatingPreferencesRow): Partial<DatingPreferences
     heightMaxInches: row.height_max_inches,
     maxDistanceMiles: row.max_distance_miles,
     preferredOrientations: row.preferred_orientations as SexualOrientation[],
-    preferredLookingFor: row.preferred_looking_for as LookingFor[],
+    preferredLookingFor: row.preferred_looking_for as GenderIdentity[],
     preferredQueerRoles: row.preferred_queer_roles as QueerRole[],
-    preferredPresentationTags: row.preferred_presentation_tags as PresentationTag[],
-    dealbreakers: row.dealbreakers,
-    niceToHaves: row.nice_to_haves,
+    preferredPresentationTags: normalizePresentationTags(row.preferred_presentation_tags),
     matchingPriorityOrder: normalizeMatchingPriorityOrder(
       row.matching_priority_order as MatchingPriorityCategory[] | undefined,
     ),
@@ -101,8 +101,11 @@ function buildProfileUpdatePayload(
   if (profile.sexualOrientation !== undefined) {
     payload.sexual_orientation = profile.sexualOrientation;
   }
-  if (profile.lookingFor !== undefined) {
-    payload.looking_for = profile.lookingFor;
+  if (profile.datingIntentions !== undefined) {
+    payload.dating_intentions = profile.datingIntentions;
+  }
+  if (profile.interestedInGenders !== undefined) {
+    payload.looking_for = profile.interestedInGenders;
   }
   if (profile.queerRoles !== undefined) {
     payload.queer_roles = profile.queerRoles;
@@ -111,7 +114,7 @@ function buildProfileUpdatePayload(
     payload.presentation_tags = profile.presentationTags;
   }
   if (profile.personalityTags !== undefined) {
-    payload.personality_tags = profile.personalityTags;
+    payload.personality_tags = [];
   }
   if (profile.lifestyleTags !== undefined) {
     payload.lifestyle_tags = profile.lifestyleTags;
@@ -157,15 +160,13 @@ function buildPreferencesUpdatePayload(
   if (preferences.preferredPresentationTags !== undefined) {
     payload.preferred_presentation_tags = preferences.preferredPresentationTags;
   }
-  if (preferences.dealbreakers !== undefined) {
-    payload.dealbreakers = preferences.dealbreakers;
-  }
-  if (preferences.niceToHaves !== undefined) {
-    payload.nice_to_haves = preferences.niceToHaves;
-  }
   if (preferences.matchingPriorityOrder !== undefined) {
     payload.matching_priority_order = preferences.matchingPriorityOrder;
   }
+
+  // Clear legacy fields no longer used in the app.
+  payload.dealbreakers = [];
+  payload.nice_to_haves = [];
 
   return payload;
 }

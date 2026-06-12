@@ -1,24 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BrandLogo, Button, Input, PasswordRequirements, ScreenContainer, SelectableOption } from '../components';
-import { SIGNUP_AGREEMENT_POINTS } from '../constants/legalContent';
+import { AuthFlowLogo, Button, Input, ScreenContainer, SelectableOption } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { logAndFormatAuthError, logAuthDebug } from '../utils/authErrors';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { runSupabaseConnectionTest } from '../services/supabaseHealth';
 import { formatPhoneInput, phoneDigits } from '../utils/formatPhone';
-import { passwordMeetsRequirements, passwordsMatch } from '../utils/passwordValidation';
+import { textInputMetrics } from '../utils/platformStyles';
+import { passwordMeetsRequirements, passwordsMatch, getPasswordValidationMessage } from '../utils/passwordValidation';
 import type { ContactVerificationMethod } from '../types';
 import type { AuthScreenProps } from '../navigation/types';
 
 type AuthMode = 'signup' | 'login';
 type LoginMethod = 'phone' | 'email';
 
+const USE_NATIVE_SIGNUP_STEPS = Platform.OS === 'ios' || Platform.OS === 'android';
+const SIGNUP_WIZARD_STEPS = 3;
+
+const SIGNUP_STEP_SUBTITLES = [
+  'Real name and age help keep the community safe.',
+  'How should we verify you?',
+  'Create your password',
+];
+
 export function AuthScreen({ navigation, route }: AuthScreenProps) {
-  const { login, markLoggedIn, updateProfile, updateAccount, isOnboarded, syncFromSupabase } =
-    useApp();
+  const { login, markLoggedIn, updateProfile, updateAccount, syncFromSupabase } = useApp();
   const { isSupabaseEnabled, signIn, signUp } = useAuth();
   const [mode, setMode] = useState<AuthMode>(route.params?.initialMode ?? 'login');
   const [loginMethod, setLoginMethod] = useState<LoginMethod>(
@@ -38,6 +46,8 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
     isSupabaseEnabled ? 'email' : 'phone',
   );
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [signupStep, setSignupStep] = useState(0);
+  const [signupStepAttempted, setSignupStepAttempted] = useState(false);
   const [connectionTestSummary, setConnectionTestSummary] = useState<string | null>(null);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
 
@@ -58,7 +68,13 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
 
   useEffect(() => {
     setAuthError(null);
-  }, [mode, loginMethod, verificationMethod]);
+    setSignupStep(0);
+    setSignupStepAttempted(false);
+  }, [mode]);
+
+  useEffect(() => {
+    setAuthError(null);
+  }, [loginMethod, verificationMethod]);
 
   useEffect(() => {
     if (route.params?.initialMode) {
@@ -176,11 +192,7 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
       try {
         const session = await signIn({ email: email.trim(), password });
         const { nextRoute } = await syncFromSupabase(session.user.id);
-        if (nextRoute === 'Verification') {
-          navigation.replace('Verification', { context: 'onboarding' });
-        } else {
-          navigation.replace(nextRoute);
-        }
+        navigation.replace(nextRoute === 'Verification' ? 'SpeedDateLobby' : nextRoute);
       } catch (error) {
         showAuthError(error, 'AuthScreen.login', 'Log in failed');
       } finally {
@@ -190,17 +202,19 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
     }
 
     logAuthDebug('Demo login (no Supabase env)');
-    if (isOnboarded) {
-      login();
-      navigation.replace('SpeedDateLobby');
-    } else {
-      markLoggedIn();
-      navigation.replace('ProfileCreation');
-    }
+    login();
+    navigation.replace('SpeedDateLobby');
   };
 
   const handleSignup = async () => {
-    if (!signupReady) return;
+    if (!signupReady) {
+      const errors = validateSignupStep(SIGNUP_WIZARD_STEPS - 1);
+      Alert.alert(
+        'Almost there',
+        errors[0] ?? 'Fill in all required fields to create your account.',
+      );
+      return;
+    }
     setAuthError(null);
 
     const ageNum = parseInt(age, 10);
@@ -251,16 +265,13 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
         }
 
         markLoggedIn();
-        try {
-          const { nextRoute } = await syncFromSupabase(result.user.id);
-          if (nextRoute === 'Verification') {
-            navigation.replace('Verification', { context: 'onboarding' });
-          } else {
-            navigation.replace(nextRoute);
-          }
-        } catch (syncError) {
-          showAuthError(syncError, 'AuthScreen.syncAfterSignUp', 'Could not load profile');
-        }
+        navigation.navigate('ContactVerification', {
+          flow: 'signup',
+          phone: phone.trim(),
+          email: email.trim(),
+          verificationMethod,
+        });
+        return;
       } catch (error) {
         showAuthError(error, 'AuthScreen.signUp', 'Sign up failed');
       } finally {
@@ -278,11 +289,279 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
     });
   };
 
-  return (
-    <ScreenContainer scroll contentStyle={styles.content}>
-      <View style={styles.logoHeader}>
-        <BrandLogo size="auth" />
+  const nativeSignupFlow = USE_NATIVE_SIGNUP_STEPS && mode === 'signup';
+
+  const validateSignupStep = (step: number): string[] => {
+    const errors: string[] = [];
+    const ageNum = parseInt(age, 10);
+
+    if (step === 0) {
+      if (!firstName.trim()) errors.push('Enter your first name');
+      if (!lastName.trim()) errors.push('Enter your last name');
+      if (!ageNum || ageNum < 18) errors.push('Enter an age of 18 or older');
+    }
+
+    if (step === 1) {
+      if (isSupabaseEnabled && !email.trim().includes('@')) {
+        errors.push('Enter a valid email');
+      }
+      if (!isSupabaseEnabled && verificationMethod === 'phone' && phoneDigits(phone).length < 10) {
+        errors.push('Enter a valid mobile number');
+      }
+      if (!isSupabaseEnabled && verificationMethod === 'email' && !email.trim().includes('@')) {
+        errors.push('Enter a valid email');
+      }
+    }
+
+    if (step === 2) {
+      const passwordIssue = getPasswordValidationMessage(password);
+      if (passwordIssue) {
+        errors.push(passwordIssue);
+      }
+      if (!passwordsMatch(password, confirmPassword)) {
+        errors.push('Passwords do not match');
+      }
+      if (!agreedToTerms) {
+        errors.push('Agree to the terms to continue');
+      }
+    }
+
+    return errors;
+  };
+
+  const signupStepErrors = signupStepAttempted ? validateSignupStep(signupStep) : [];
+
+  const handleSignupStepContinue = () => {
+    if (!nativeSignupFlow) {
+      void handleSignup();
+      return;
+    }
+
+    setSignupStepAttempted(true);
+    const errors = validateSignupStep(signupStep);
+    if (errors.length > 0) {
+      Alert.alert('Almost there', errors[0]);
+      return;
+    }
+
+    if (signupStep < SIGNUP_WIZARD_STEPS - 1) {
+      setSignupStepAttempted(false);
+      setSignupStep((step) => step + 1);
+      return;
+    }
+
+    void handleSignup();
+  };
+
+  const handleSignupBack = () => {
+    if (nativeSignupFlow && signupStep > 0) {
+      setSignupStepAttempted(false);
+      setSignupStep((step) => step - 1);
+      return;
+    }
+    navigation.goBack();
+  };
+
+  const renderSignupNameStep = () => (
+    <>
+      <View style={styles.nameRow}>
+        <View style={styles.nameField}>
+          <Input
+            label="First name"
+            placeholder="Alex"
+            value={firstName}
+            onChangeText={setFirstName}
+            autoCapitalize="words"
+          />
+        </View>
+        <View style={styles.nameField}>
+          <Input
+            label="Last name"
+            placeholder="Rivera"
+            value={lastName}
+            onChangeText={setLastName}
+            autoCapitalize="words"
+          />
+        </View>
       </View>
+      <Input
+        label="Age"
+        placeholder="25"
+        value={age}
+        onChangeText={setAge}
+        keyboardType="number-pad"
+        hint="You must be 18 or older"
+      />
+    </>
+  );
+
+  const renderSignupContactStep = () => (
+    <>
+      {!isSupabaseEnabled ? (
+        <>
+          <SelectableOption
+            selected={verificationMethod === 'phone'}
+            onPress={() => setVerificationMethod('phone')}
+            icon="chatbubble-ellipses-outline"
+            title="Text message"
+          />
+          <SelectableOption
+            selected={verificationMethod === 'email'}
+            onPress={() => setVerificationMethod('email')}
+            icon="mail-outline"
+            title="Email"
+          />
+        </>
+      ) : (
+        <Text style={styles.demoNote}>
+          Your account uses email and password. Optional contact info below is for your profile only.
+        </Text>
+      )}
+
+      {verificationMethod === 'phone' && !isSupabaseEnabled ? (
+        <>
+          <Text style={styles.sectionLabel}>Mobile number</Text>
+          <View style={styles.phoneRow}>
+            <View style={styles.countryCode}>
+              <Text style={styles.countryCodeText}>+1</Text>
+            </View>
+            <TextInput
+              style={styles.phoneInput}
+              placeholder="(555) 555-0100"
+              placeholderTextColor={colors.textMuted}
+              value={phone}
+              onChangeText={handlePhoneChange}
+              keyboardType="phone-pad"
+              showSoftInputOnFocus
+              maxLength={14}
+            />
+          </View>
+          <Input
+            label={isSupabaseEnabled ? 'Email (required for account)' : 'Email (optional)'}
+            placeholder="For account recovery"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+        </>
+      ) : (
+        <>
+          <Input
+            label={isSupabaseEnabled ? 'Email (required for account)' : 'Email'}
+            placeholder="you@example.com"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+          <Text style={styles.sectionLabel}>Mobile number (optional)</Text>
+          <View style={styles.phoneRow}>
+            <View style={styles.countryCode}>
+              <Text style={styles.countryCodeText}>+1</Text>
+            </View>
+            <TextInput
+              style={styles.phoneInput}
+              placeholder="(555) 555-0100"
+              placeholderTextColor={colors.textMuted}
+              value={phone}
+              onChangeText={handlePhoneChange}
+              keyboardType="phone-pad"
+              showSoftInputOnFocus
+              maxLength={14}
+            />
+          </View>
+        </>
+      )}
+    </>
+  );
+
+  const renderAgreementCard = () => (
+    <View style={styles.agreementCard}>
+      <Pressable
+        style={styles.agreementRow}
+        onPress={() => setAgreedToTerms((value) => !value)}
+      >
+        <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
+          {agreedToTerms ? <Ionicons name="checkmark" size={14} color={colors.text} /> : null}
+        </View>
+        <Text style={styles.agreementText}>
+          I confirm I'm 18+ and agree to the{' '}
+          <Text
+            style={styles.link}
+            onPress={() => navigation.navigate('LegalDocument', { documentId: 'terms' })}
+          >
+            Terms of Service
+          </Text>
+          ,{' '}
+          <Text
+            style={styles.link}
+            onPress={() => navigation.navigate('LegalDocument', { documentId: 'privacy' })}
+          >
+            Privacy Policy
+          </Text>
+          , and{' '}
+          <Text
+            style={styles.link}
+            onPress={() => navigation.navigate('LegalDocument', { documentId: 'community' })}
+          >
+            Community Guidelines
+          </Text>
+          .
+        </Text>
+      </Pressable>
+    </View>
+  );
+
+  const renderSignupSecurityStep = () => (
+    <>
+      <Input
+        label="Create a password"
+        placeholder="Create a strong password"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+        hint="At least 8 characters with upper, lower, and a number"
+      />
+      <Input
+        label="Confirm password"
+        placeholder="Re-enter your password"
+        value={confirmPassword}
+        onChangeText={setConfirmPassword}
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+        error={confirmPasswordError}
+      />
+      {renderAgreementCard()}
+    </>
+  );
+
+  const renderSignupScrollForm = () => (
+    <>
+      {renderSignupNameStep()}
+      {renderSignupContactStep()}
+      {renderSignupSecurityStep()}
+    </>
+  );
+
+  const renderNativeSignupStep = () => {
+    switch (signupStep) {
+      case 0:
+        return renderSignupNameStep();
+      case 1:
+        return renderSignupContactStep();
+      case 2:
+      default:
+        return renderSignupSecurityStep();
+    }
+  };
+
+  return (
+    <ScreenContainer scroll={true} contentStyle={styles.content}>
+      <AuthFlowLogo />
 
       <View style={styles.modeTabs}>
         <Pressable
@@ -331,189 +610,33 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
         <>
           <Text style={styles.title}>Create your account</Text>
           <Text style={styles.subtitle}>
-            {isSupabaseEnabled
-              ? 'Create an account with your email and password. Phone verification codes are demo-only until SMS is wired up.'
-              : 'Real name and age help keep the community safe. Your number or email is only used to verify you — never shown on your profile.'}
+            {nativeSignupFlow
+              ? SIGNUP_STEP_SUBTITLES[signupStep]
+              : isSupabaseEnabled
+                ? 'Create an account with your email and password.'
+                : 'Real name and age help keep the community safe. Your number or email is only used to verify you — never shown on your profile.'}
           </Text>
 
-          <Text style={styles.sectionLabel}>Your name</Text>
-          <View style={styles.nameRow}>
-            <View style={styles.nameField}>
-              <Input
-                label="First name"
-                placeholder="Alex"
-                value={firstName}
-                onChangeText={setFirstName}
-                autoCapitalize="words"
-              />
+          {nativeSignupFlow ? renderNativeSignupStep() : renderSignupScrollForm()}
+
+          {signupStepErrors.length > 0 ? (
+            <View style={styles.authErrorBanner} accessibilityRole="alert">
+              <Ionicons name="alert-circle" size={20} color={colors.error} />
+              <Text style={styles.authErrorText}>{signupStepErrors[0]}</Text>
             </View>
-            <View style={styles.nameField}>
-              <Input
-                label="Last name"
-                placeholder="Rivera"
-                value={lastName}
-                onChangeText={setLastName}
-                autoCapitalize="words"
-              />
-            </View>
-          </View>
-
-          <Input
-            label="Age"
-            placeholder="25"
-            value={age}
-            onChangeText={setAge}
-            keyboardType="number-pad"
-            hint="You must be 18 or older"
-          />
-
-          <Text style={styles.sectionLabel}>How should we verify you?</Text>
-          {!isSupabaseEnabled ? (
-            <>
-              <SelectableOption
-                selected={verificationMethod === 'phone'}
-                onPress={() => setVerificationMethod('phone')}
-                icon="chatbubble-ellipses-outline"
-                title="Text message"
-                description="We'll send a 6-digit code to your phone"
-              />
-              <SelectableOption
-                selected={verificationMethod === 'email'}
-                onPress={() => setVerificationMethod('email')}
-                icon="mail-outline"
-                title="Email"
-                description="We'll send a 6-digit code to your inbox"
-              />
-            </>
-          ) : (
-            <Text style={styles.demoNote}>
-              Your account uses email and password. Optional contact info below is for your profile only.
-            </Text>
-          )}
-
-          {verificationMethod === 'phone' && !isSupabaseEnabled ? (
-            <>
-              <Text style={styles.sectionLabel}>Mobile number</Text>
-              <View style={styles.phoneRow}>
-                <View style={styles.countryCode}>
-                  <Text style={styles.countryCodeText}>+1</Text>
-                </View>
-                <TextInput
-                  style={styles.phoneInput}
-                  placeholder="(555) 555-0100"
-                  placeholderTextColor={colors.textMuted}
-                  value={phone}
-                  onChangeText={handlePhoneChange}
-                  keyboardType="phone-pad"
-                  maxLength={14}
-                />
-              </View>
-              <Input
-                label={isSupabaseEnabled ? 'Email (required for account)' : 'Email (optional)'}
-                placeholder="For account recovery"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </>
-          ) : (
-            <>
-              <Input
-                label={isSupabaseEnabled ? 'Email (required for account)' : 'Email'}
-                placeholder="you@example.com"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-              <Text style={styles.sectionLabel}>Mobile number (optional)</Text>
-              <View style={styles.phoneRow}>
-                <View style={styles.countryCode}>
-                  <Text style={styles.countryCodeText}>+1</Text>
-                </View>
-                <TextInput
-                  style={styles.phoneInput}
-                  placeholder="(555) 555-0100"
-                  placeholderTextColor={colors.textMuted}
-                  value={phone}
-                  onChangeText={handlePhoneChange}
-                  keyboardType="phone-pad"
-                  maxLength={14}
-                />
-              </View>
-            </>
-          )}
-
-          <Text style={styles.sectionLabel}>Password</Text>
-          <Input
-            label="Create a password"
-            placeholder="Create a strong password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <PasswordRequirements password={password} confirmPassword={confirmPassword} />
-          <Input
-            label="Confirm password"
-            placeholder="Re-enter your password"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            error={confirmPasswordError}
-          />
-
-          <View style={styles.agreementCard}>
-            <Pressable
-              style={styles.agreementRow}
-              onPress={() => setAgreedToTerms((value) => !value)}
-            >
-              <View style={[styles.checkbox, agreedToTerms && styles.checkboxChecked]}>
-                {agreedToTerms ? <Ionicons name="checkmark" size={14} color={colors.text} /> : null}
-              </View>
-              <Text style={styles.agreementText}>
-                I confirm I'm 18+ and agree to the{' '}
-                <Text
-                  style={styles.link}
-                  onPress={() => navigation.navigate('LegalDocument', { documentId: 'terms' })}
-                >
-                  Terms of Service
-                </Text>
-                ,{' '}
-                <Text
-                  style={styles.link}
-                  onPress={() => navigation.navigate('LegalDocument', { documentId: 'privacy' })}
-                >
-                  Privacy Policy
-                </Text>
-                , and{' '}
-                <Text
-                  style={styles.link}
-                  onPress={() => navigation.navigate('LegalDocument', { documentId: 'community' })}
-                >
-                  Community Guidelines
-                </Text>
-                .
-              </Text>
-            </Pressable>
-
-            {SIGNUP_AGREEMENT_POINTS.map((point) => (
-              <View key={point} style={styles.agreementPoint}>
-                <Text style={styles.agreementBullet}>·</Text>
-                <Text style={styles.agreementPointText}>{point}</Text>
-              </View>
-            ))}
-          </View>
+          ) : null}
 
           <Button
-            title="Continue"
-            onPress={handleSignup}
+            title={
+              nativeSignupFlow
+                ? signupStep < SIGNUP_WIZARD_STEPS - 1
+                  ? 'Continue'
+                  : 'Create account'
+                : 'Continue'
+            }
+            onPress={handleSignupStepContinue}
             size="lg"
-            disabled={!signupReady || isSubmitting}
+            disabled={(!nativeSignupFlow && !signupReady) || isSubmitting}
             loading={isSubmitting}
             style={styles.submitBtn}
           />
@@ -566,6 +689,7 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
                   value={phone}
                   onChangeText={handlePhoneChange}
                   keyboardType="phone-pad"
+                  showSoftInputOnFocus
                   maxLength={14}
                 />
               </View>
@@ -602,7 +726,11 @@ export function AuthScreen({ navigation, route }: AuthScreenProps) {
         </>
       )}
 
-      <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />
+      <Button
+        title="Back"
+        onPress={mode === 'signup' ? handleSignupBack : () => navigation.goBack()}
+        variant="ghost"
+      />
     </ScreenContainer>
   );
 }
@@ -611,10 +739,6 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
-  },
-  logoHeader: {
-    alignSelf: 'flex-start',
-    marginBottom: spacing.lg,
   },
   modeTabs: {
     flexDirection: 'row',
@@ -695,8 +819,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: 14,
-    ...typography.body,
+    ...textInputMetrics(),
     color: colors.text,
   },
   legal: {
@@ -745,22 +868,6 @@ const styles = StyleSheet.create({
     color: colors.sparkOrange,
     fontWeight: '700',
     textDecorationLine: 'underline',
-  },
-  agreementPoint: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingLeft: 30,
-  },
-  agreementBullet: {
-    ...typography.bodySmall,
-    color: colors.textMuted,
-    lineHeight: 20,
-  },
-  agreementPointText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    flex: 1,
-    lineHeight: 18,
   },
   loginMethodRow: {
     flexDirection: 'row',
@@ -822,5 +929,11 @@ const styles = StyleSheet.create({
     color: colors.error,
     flex: 1,
     lineHeight: 20,
+  },
+  stepIndicator: {
+    ...typography.caption,
+    color: colors.textMuted,
+    fontWeight: '600',
+    marginBottom: spacing.md,
   },
 });

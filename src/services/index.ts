@@ -29,4 +29,5 @@ export * from './speedDates';
 export * from './dateFeedback';
 export * from './messages';
 export * from './realtimeSubscriptions';
+export * from './contactVerification';
 export * from './backendLogger';

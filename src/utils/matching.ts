@@ -24,11 +24,11 @@ export function estimateCompatibility(
     highlights.push('Within your preferred age range');
   }
 
-  if (viewer.lookingFor?.length && partner.lookingFor?.length) {
-    const overlap = viewer.lookingFor.filter((v) => partner.lookingFor.includes(v));
-    if (overlap.length > 0) {
+  if (prefs.preferredLookingFor?.length) {
+    const matchesInterest = prefs.preferredLookingFor.includes(partner.genderIdentity);
+    if (matchesInterest) {
       score += 10;
-      highlights.push('Shared dating intentions');
+      highlights.push('Matches who you want to meet');
     }
   }
 
@@ -50,11 +50,11 @@ export function estimateCompatibility(
     }
   }
 
-  const personalityOverlap =
-    viewer.personalityTags?.filter((t) => partner.personalityTags.includes(t)) ?? [];
-  if (personalityOverlap.length > 0) {
+  const tagOverlap =
+    viewer.lifestyleTags?.filter((t) => partner.lifestyleTags.includes(t)) ?? [];
+  if (tagOverlap.length > 0) {
     score += 5;
-    highlights.push(`Shared vibes: ${personalityOverlap.slice(0, 2).join(', ')}`);
+    highlights.push(`Shared values: ${tagOverlap.slice(0, 2).join(', ')}`);
   }
 
   if (partner.verificationStatus === 'verified') {

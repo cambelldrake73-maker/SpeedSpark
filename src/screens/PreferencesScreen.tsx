@@ -1,133 +1,140 @@
 import React, { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Button,
-  ChipGrid,
   DistanceSlider,
+  DraggablePriorityList,
   FormErrorBanner,
-  HeightFields,
+  HeightRangeSlider,
+  AuthFlowLogo,
   OnboardingStep,
   ScreenContainer,
   SectionHeader,
   TagSelector,
 } from '../components';
 import {
-  COPY,
-  DEALBREAKER_OPTIONS,
-  LOOKING_FOR_OPTIONS,
-  NICE_TO_HAVE_OPTIONS,
-  ORIENTATION_OPTIONS,
+  INTERESTED_IN_GENDER_OPTIONS,
   PRESENTATION_OPTIONS,
 } from '../constants/options';
 import {
   DEFAULT_MATCHING_PRIORITY_ORDER,
-  MATCHING_PRIORITY_HINTS,
-  MATCHING_PRIORITY_LABELS,
-  movePriorityItem,
   normalizeMatchingPriorityOrder,
 } from '../constants/matchingPriorities';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
+import {
+  ONBOARDING_TOTAL_STEPS,
+  onboardingStepForPrefsWizard,
+} from '../constants/onboardingProgress';
+import { formatAuthErrorForUser } from '../utils/authErrors';
+import { normalizeHeightInches } from '../utils/heightFormat';
 import { useApp } from '../context/AppContext';
 import { isSupabaseConfigured } from '../services/supabaseEnv';
-import { formatAuthErrorForUser } from '../utils/authErrors';
-import type { LookingFor, MatchingPriorityCategory, PresentationTag, SexualOrientation } from '../types';
+import type { GenderIdentity, MatchingPriorityCategory, PresentationTag } from '../types';
 import type { PreferencesScreenProps } from '../navigation/types';
-import {
-  formatHeightInches,
-  inchesToFeetInches,
-  parseFeetInchesFields,
-  validateFeetInchesFields,
-} from '../utils/heightFormat';
+
+const USE_NATIVE_PREFS_STEPS = Platform.OS === 'ios' || Platform.OS === 'android';
+const PREFS_WIZARD_STEPS = 3;
+const PREFS_SCROLL_STEPS = new Set([0, 1, 2]);
+
+const PREFS_STEP_TITLES = [
+  'Who you want to meet',
+  'Physical preferences',
+  'Rank',
+];
+
+const PREFS_STEP_SUBTITLES = [
+  'Genders, age range, and how far we search.',
+  'Height range and presentation compatibility.',
+  undefined,
+];
 
 export function PreferencesScreen({ navigation, route }: PreferencesScreenProps) {
   const fromSettings = route.params?.fromSettings === true;
-  const { onboarding, preferences, updatePreferences, savePreferencesToServer } = useApp();
+  const nativePrefsFlow = USE_NATIVE_PREFS_STEPS && !fromSettings;
+  const {
+    onboarding,
+    preferences,
+    currentUser,
+    updatePreferences,
+    updateCurrentUser,
+    savePreferencesToServer,
+  } = useApp();
   const prefs = fromSettings ? preferences : onboarding.preferences;
 
+  const [wizardStep, setWizardStep] = useState(0);
+  const [stepAttempted, setStepAttempted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [ageRangeMin, setAgeRangeMin] = useState(prefs.ageRangeMin ?? 21);
   const [ageRangeMax, setAgeRangeMax] = useState(prefs.ageRangeMax ?? 40);
-
-  const initialMin = inchesToFeetInches(prefs.heightMinInches ?? 60);
-  const initialMax = inchesToFeetInches(prefs.heightMaxInches ?? 84);
-  const [minFeet, setMinFeet] = useState(initialMin.feet);
-  const [minInches, setMinInches] = useState(initialMin.inches);
-  const [maxFeet, setMaxFeet] = useState(initialMax.feet);
-  const [maxInches, setMaxInches] = useState(initialMax.inches);
+  const [heightMinInches, setHeightMinInches] = useState(() =>
+    normalizeHeightInches(prefs.heightMinInches, 60),
+  );
+  const [heightMaxInches, setHeightMaxInches] = useState(() =>
+    normalizeHeightInches(prefs.heightMaxInches, 84),
+  );
 
   const [maxDistanceMiles, setMaxDistanceMiles] = useState(prefs.maxDistanceMiles ?? 25);
-  const [preferredOrientations, setPreferredOrientations] = useState<SexualOrientation[]>(
-    prefs.preferredOrientations ?? [],
-  );
-  const [preferredLookingFor, setPreferredLookingFor] = useState<LookingFor[]>(
-    prefs.preferredLookingFor ?? [],
-  );
+  const [preferredLookingFor, setPreferredLookingFor] = useState<GenderIdentity[]>(() => {
+    const fromPrefs = prefs.preferredLookingFor ?? [];
+    if (fromPrefs.length > 0) {
+      return fromPrefs;
+    }
+    if (fromSettings) {
+      return currentUser.interestedInGenders ?? [];
+    }
+    return onboarding.profile.interestedInGenders ?? [];
+  });
   const [preferredPresentationTags, setPreferredPresentationTags] = useState<PresentationTag[]>(
     prefs.preferredPresentationTags ?? [],
   );
-  const [dealbreakers, setDealbreakers] = useState<string[]>(prefs.dealbreakers ?? []);
-  const [niceToHaves, setNiceToHaves] = useState<string[]>(prefs.niceToHaves ?? []);
   const [matchingPriorityOrder, setMatchingPriorityOrder] = useState<MatchingPriorityCategory[]>(
     () =>
       normalizeMatchingPriorityOrder(
         prefs.matchingPriorityOrder ?? DEFAULT_MATCHING_PRIORITY_ORDER,
       ),
   );
+  const [priorityDragging, setPriorityDragging] = useState(false);
 
   const toggle = <T extends string>(list: T[], value: T, setter: (v: T[]) => void) => {
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
-  const minHeightError = validateFeetInchesFields(minFeet, minInches);
-  const maxHeightError = validateFeetInchesFields(maxFeet, maxInches);
-  const parsedMin = parseFeetInchesFields(minFeet, minInches);
-  const parsedMax = parseFeetInchesFields(maxFeet, maxInches);
-  const rangeOrderError =
-    parsedMin != null && parsedMax != null && parsedMin > parsedMax
-      ? 'Minimum height cannot be taller than maximum'
-      : null;
-
   const bannerMessages = useMemo(() => {
     const messages: string[] = [];
+    if (nativePrefsFlow && stepAttempted && wizardStep === 0 && preferredLookingFor.length === 0) {
+      messages.push('Select at least one gender you are looking for');
+    }
     if (saveError) {
       messages.push(saveError);
     }
-    if (!submitAttempted) {
-      return messages;
-    }
-    if (minHeightError) messages.push(`Min height: ${minHeightError}`);
-    if (maxHeightError) messages.push(`Max height: ${maxHeightError}`);
-    if (rangeOrderError) messages.push(rangeOrderError);
     return messages;
-  }, [submitAttempted, minHeightError, maxHeightError, rangeOrderError, saveError]);
+  }, [nativePrefsFlow, stepAttempted, wizardStep, preferredLookingFor.length, saveError]);
 
-  const showHeightErrors = submitAttempted;
-
-  const handleContinue = async () => {
-    setSubmitAttempted(true);
+  const savePreferences = async () => {
     setSaveError(null);
 
-    if (minHeightError || maxHeightError || rangeOrderError) return;
+    if (preferredLookingFor.length === 0) {
+      setSaveError('Select at least one gender you are looking for');
+      return;
+    }
 
     const prefsUpdate = {
       ageRangeMin,
       ageRangeMax,
-      heightMinInches: parsedMin!,
-      heightMaxInches: parsedMax!,
+      heightMinInches,
+      heightMaxInches,
       maxDistanceMiles,
-      preferredOrientations,
+      preferredOrientations: [],
       preferredLookingFor,
       preferredQueerRoles: [],
       preferredPresentationTags,
-      dealbreakers,
-      niceToHaves,
       matchingPriorityOrder,
     };
 
     updatePreferences(prefsUpdate);
+    updateCurrentUser({ interestedInGenders: preferredLookingFor });
 
     if (isSupabaseConfigured) {
       setIsSaving(true);
@@ -149,26 +156,52 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
     navigation.navigate('Verification', { context: 'onboarding' });
   };
 
-  return (
-    <ScreenContainer scroll contentStyle={styles.content}>
-      {fromSettings ? (
-        <View style={styles.settingsHeader}>
-          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={colors.text} />
-          </Pressable>
-          <Text style={styles.settingsHeaderTitle}>Match preferences</Text>
-          <View style={styles.backBtn} />
-        </View>
-      ) : (
-        <OnboardingStep
-          flowLabel="Step 2 of 3"
-          currentStep={2}
-          totalSteps={3}
-          title="Your match preferences"
-          subtitle="Tell us who you'd love to meet. Leave sections blank to stay open-minded — we'll still prioritize safety and shared intentions."
-        />
-      )}
+  const handleContinue = () => {
+    if (nativePrefsFlow) {
+      setStepAttempted(true);
+      setSaveError(null);
 
+      if (wizardStep === 0 && preferredLookingFor.length === 0) {
+        return;
+      }
+
+      if (wizardStep < PREFS_WIZARD_STEPS - 1) {
+        setStepAttempted(false);
+        setWizardStep((step) => step + 1);
+        return;
+      }
+
+      void savePreferences();
+      return;
+    }
+
+    void savePreferences();
+  };
+
+  const handleBack = () => {
+    if (nativePrefsFlow && wizardStep > 0) {
+      setStepAttempted(false);
+      setSaveError(null);
+      setWizardStep((step) => step - 1);
+      return;
+    }
+    navigation.goBack();
+  };
+
+  const renderLookingFor = () => (
+    <>
+      <SectionHeader title="Looking for" hint="Select all genders you are open to meeting" />
+      <TagSelector
+        options={INTERESTED_IN_GENDER_OPTIONS}
+        selected={preferredLookingFor}
+        onToggle={(v) => toggle(preferredLookingFor, v, setPreferredLookingFor)}
+        compact
+      />
+    </>
+  );
+
+  const renderAgeAndDistance = () => (
+    <>
       <SectionHeader title="Age range" />
       <View style={styles.rangeRow}>
         <RangeControl
@@ -188,149 +221,146 @@ export function PreferencesScreen({ navigation, route }: PreferencesScreenProps)
 
       <SectionHeader title="Maximum distance" hint="Drag to set how far you'll match" />
       <DistanceSlider value={maxDistanceMiles} onChange={setMaxDistanceMiles} />
+    </>
+  );
 
+  const renderHeight = () => (
+    <>
+      <SectionHeader title="Height preference" hint="Drag to set your preferred height range" />
+      <HeightRangeSlider
+        minInches={heightMinInches}
+        maxInches={heightMaxInches}
+        onChangeMin={setHeightMinInches}
+        onChangeMax={setHeightMaxInches}
+      />
+    </>
+  );
+
+  const renderPresentation = () => (
+    <>
       <SectionHeader
-        title="Height preference"
-        hint={showHeightErrors ? undefined : 'Optional range for match fit'}
-        error={
-          showHeightErrors && rangeOrderError && !minHeightError && !maxHeightError
-            ? rangeOrderError
-            : undefined
-        }
+        title="Presentation compatibility"
+        hint="Optional — who you tend to connect with visually"
       />
-      <View style={styles.heightRow}>
-        <View style={styles.heightField}>
-          <HeightFields
-            label="Min"
-            feet={minFeet}
-            inches={minInches}
-            onFeetChange={setMinFeet}
-            onInchesChange={setMinInches}
-            error={showHeightErrors ? minHeightError ?? undefined : undefined}
-          />
-        </View>
-        <View style={styles.heightField}>
-          <HeightFields
-            label="Max"
-            feet={maxFeet}
-            inches={maxInches}
-            onFeetChange={setMaxFeet}
-            onInchesChange={setMaxInches}
-            error={showHeightErrors ? maxHeightError ?? undefined : undefined}
-          />
-        </View>
-      </View>
-      {!showHeightErrors && !minHeightError && !maxHeightError && parsedMin !== null && parsedMax !== null && (
-        <Text style={styles.heightPrefLabel}>
-          {formatHeightInches(parsedMin)} – {formatHeightInches(parsedMax)}
-        </Text>
-      )}
-
-      <SectionHeader
-        title="Dating intention compatibility"
-        hint="Whose goals align with yours?"
-      />
-      <TagSelector
-        options={LOOKING_FOR_OPTIONS}
-        selected={preferredLookingFor}
-        onToggle={(v) => toggle(preferredLookingFor, v, setPreferredLookingFor)}
-      />
-
-      <SectionHeader title="Orientation" hint="Leave empty to stay open to all" />
-      <TagSelector
-        options={ORIENTATION_OPTIONS}
-        selected={preferredOrientations}
-        onToggle={(v) => toggle(preferredOrientations, v, setPreferredOrientations)}
-      />
-
-      <SectionHeader title="Presentation compatibility" hint="Optional" />
       <TagSelector
         options={PRESENTATION_OPTIONS}
         selected={preferredPresentationTags}
         onToggle={(v) => toggle(preferredPresentationTags, v, setPreferredPresentationTags)}
+        compact
       />
+    </>
+  );
 
-      <SectionHeader
-        title="Rank what matters most"
-        hint="Top = strongest influence on your matches. Private chemistry uses feedback only — never shown publicly."
+  const renderPriorities = (showHeader = true) => (
+    <>
+      {showHeader ? <SectionHeader title="Rank" /> : null}
+      <DraggablePriorityList
+        order={matchingPriorityOrder}
+        onChange={setMatchingPriorityOrder}
+        onDragStateChange={setPriorityDragging}
       />
-      <View style={styles.priorityList}>
-        {matchingPriorityOrder.map((category, index) => (
-          <View key={category} style={styles.priorityRow}>
-            <View style={styles.priorityRank}>
-              <Text style={styles.priorityRankText}>{index + 1}</Text>
-            </View>
-            <View style={styles.priorityCopy}>
-              <Text style={styles.priorityLabel}>{MATCHING_PRIORITY_LABELS[category]}</Text>
-              <Text style={styles.priorityHint}>{MATCHING_PRIORITY_HINTS[category]}</Text>
-            </View>
-            <View style={styles.priorityActions}>
-              <Pressable
-                style={[styles.priorityBtn, index === 0 && styles.priorityBtnDisabled]}
-                onPress={() =>
-                  setMatchingPriorityOrder((order) => movePriorityItem(order, index, 'up'))
-                }
-                disabled={index === 0}
-              >
-                <Ionicons name="chevron-up" size={18} color={colors.primary} />
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.priorityBtn,
-                  index === matchingPriorityOrder.length - 1 && styles.priorityBtnDisabled,
-                ]}
-                onPress={() =>
-                  setMatchingPriorityOrder((order) => movePriorityItem(order, index, 'down'))
-                }
-                disabled={index === matchingPriorityOrder.length - 1}
-              >
-                <Ionicons name="chevron-down" size={18} color={colors.primary} />
-              </Pressable>
-            </View>
-          </View>
-        ))}
-      </View>
+    </>
+  );
 
-      <SectionHeader
-        title="Dealbreakers"
-        hint="Only traits someone can list on their profile — add yours under Lifestyle & values"
-      />
-      <ChipGrid
-        options={DEALBREAKER_OPTIONS}
-        selected={dealbreakers}
-        onToggle={(v) => toggle(dealbreakers, v, setDealbreakers)}
-      />
+  const renderMeetPrefs = () => (
+    <>
+      {renderLookingFor()}
+      {renderAgeAndDistance()}
+    </>
+  );
 
-      <SectionHeader
-        title="Nice-to-haves"
-        hint="Profile tags or verified status — same options people choose about themselves"
-      />
-      <ChipGrid
-        options={NICE_TO_HAVE_OPTIONS}
-        selected={niceToHaves}
-        onToggle={(v) => toggle(niceToHaves, v, setNiceToHaves)}
-      />
+  const renderPhysicalPrefs = () => (
+    <>
+      {renderHeight()}
+      {renderPresentation()}
+    </>
+  );
 
-      <View style={styles.infoBox}>
-        <Ionicons name="shield-checkmark" size={18} color={colors.primary} />
-        <View style={styles.infoContent}>
-          <Text style={styles.infoTitle}>Thoughtful matching</Text>
-          <Text style={styles.infoText}>{COPY.matchFitPrivate}</Text>
+  const renderNativeStep = () => {
+    switch (wizardStep) {
+      case 0:
+        return renderMeetPrefs();
+      case 1:
+        return renderPhysicalPrefs();
+      case 2:
+      default:
+        return renderPriorities(false);
+    }
+  };
+
+  const renderScrollForm = () => (
+    <>
+      {renderMeetPrefs()}
+      {renderPhysicalPrefs()}
+      {renderPriorities()}
+    </>
+  );
+
+  const nativeScroll = nativePrefsFlow && PREFS_SCROLL_STEPS.has(wizardStep);
+  const continueLabel = nativePrefsFlow
+    ? wizardStep < PREFS_WIZARD_STEPS - 1
+      ? 'Continue'
+      : 'Continue to verification'
+    : fromSettings
+      ? 'Save preferences'
+      : 'Continue to verification';
+
+  return (
+    <ScreenContainer
+      scroll={!nativePrefsFlow || nativeScroll}
+      scrollEnabled={!priorityDragging}
+      scrollToTopKey={nativePrefsFlow ? wizardStep : undefined}
+      scrollToTopOnFocus={!fromSettings}
+      contentStyle={nativePrefsFlow ? { ...styles.content, ...styles.contentStepped } : styles.content}
+    >
+      {fromSettings ? (
+        <View style={styles.settingsHeader}>
+          <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </Pressable>
+          <Text style={styles.settingsHeaderTitle}>Match preferences</Text>
+          <View style={styles.backBtn} />
         </View>
+      ) : (
+        <>
+          {(!nativePrefsFlow || wizardStep === 0) && <AuthFlowLogo />}
+          <OnboardingStep
+            currentStep={
+              nativePrefsFlow
+                ? onboardingStepForPrefsWizard(wizardStep)
+                : onboardingStepForPrefsWizard(0)
+            }
+            totalSteps={ONBOARDING_TOTAL_STEPS}
+            title={
+              nativePrefsFlow
+                ? PREFS_STEP_TITLES[wizardStep] ?? 'Your match preferences'
+                : 'Your match preferences'
+            }
+            subtitle={
+              nativePrefsFlow
+                ? PREFS_STEP_SUBTITLES[wizardStep]
+                : "Tell us who you'd love to meet. Leave sections blank to stay open-minded — we'll still prioritize safety and shared intentions."
+            }
+          />
+        </>
+      )}
+
+      <View style={nativePrefsFlow ? styles.stepBody : undefined}>
+        {nativePrefsFlow ? renderNativeStep() : renderScrollForm()}
       </View>
 
-      <FormErrorBanner messages={bannerMessages} />
-      <Button
-        title={fromSettings ? 'Save preferences' : 'Continue to verification'}
-        onPress={handleContinue}
-        size="lg"
-        style={styles.btn}
-        loading={isSaving}
-        disabled={isSaving}
-      />
-      {!fromSettings && (
-        <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />
-      )}
+      <View style={nativePrefsFlow ? styles.stepFooter : undefined}>
+        <FormErrorBanner messages={bannerMessages} />
+        <Button
+          title={continueLabel}
+          onPress={handleContinue}
+          size="lg"
+          style={styles.btn}
+          loading={isSaving}
+          disabled={isSaving}
+        />
+        {!fromSettings && <Button title="Back" onPress={handleBack} variant="ghost" />}
+      </View>
     </ScreenContainer>
   );
 }
@@ -366,6 +396,16 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
+  },
+  contentStepped: {
+    flexGrow: 1,
+  },
+  stepBody: {
+    flex: 1,
+    minHeight: 0,
+  },
+  stepFooter: {
+    marginTop: 'auto',
   },
   rangeRow: {
     flexDirection: 'row',
@@ -412,45 +452,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: spacing.lg,
   },
-  heightPrefLabel: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.primaryDark,
-    marginBottom: spacing.md,
-    textAlign: 'center',
-  },
-  heightRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  heightField: {
-    flex: 1,
-  },
-  infoBox: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginTop: spacing.lg,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.primaryLight,
-  },
-  infoContent: {
-    flex: 1,
-  },
-  infoTitle: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.primaryDark,
-    marginBottom: spacing.xs,
-  },
-  infoText: {
-    ...typography.caption,
-    color: colors.textSecondary,
-    lineHeight: 18,
-  },
   btn: {
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
@@ -471,61 +472,5 @@ const styles = StyleSheet.create({
     ...typography.subtitle,
     color: colors.text,
     fontWeight: '700',
-  },
-  priorityList: {
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  priorityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.sm,
-  },
-  priorityRank: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  priorityRankText: {
-    ...typography.caption,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  priorityCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  priorityLabel: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  priorityHint: {
-    ...typography.caption,
-    color: colors.textMuted,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  priorityActions: {
-    gap: 2,
-  },
-  priorityBtn: {
-    width: 32,
-    height: 28,
-    borderRadius: borderRadius.sm,
-    backgroundColor: colors.surfaceAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  priorityBtnDisabled: {
-    opacity: 0.35,
   },
 });

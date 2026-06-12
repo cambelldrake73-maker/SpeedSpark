@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BrandLogo } from './BrandLogo';
+import { AuthFlowLogo } from './BrandLogo';
 import { colors, spacing, typography } from '../constants/theme';
 import type { UserProfile } from '../types';
 
@@ -25,7 +25,7 @@ export function LobbyHeader({
   return (
     <View style={styles.wrapper}>
       <View style={styles.topRow}>
-        <BrandLogo size="auth" style={styles.logo} />
+        <AuthFlowLogo style={styles.logo} />
         <View style={styles.actions}>
           <Pressable
             style={({ pressed }) => [styles.iconBtn, pressed && styles.iconBtnPressed]}
@@ -63,27 +63,32 @@ export function LobbyHeader({
 const styles = StyleSheet.create({
   wrapper: {
     marginBottom: spacing.lg,
+    marginHorizontal: -spacing.xs,
   },
   topRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacing.md,
+    gap: spacing.xs,
     marginBottom: spacing.md,
   },
   logo: {
-    flex: 1,
-    maxWidth: '62%',
+    alignSelf: 'flex-start',
+    marginLeft: -spacing.lg,
+    marginBottom: 0,
+    flexShrink: 0,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
+    gap: spacing.xs,
+    flexShrink: 0,
+    marginLeft: spacing.sm,
+    marginRight: -spacing.xs,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
@@ -108,9 +113,9 @@ const styles = StyleSheet.create({
   messagesBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+    gap: 4,
+    paddingVertical: 7,
+    paddingHorizontal: spacing.sm,
     borderRadius: 8,
     borderWidth: 1.5,
     borderColor: colors.sparkOrange,
@@ -122,6 +127,7 @@ const styles = StyleSheet.create({
   },
   messagesBtnText: {
     ...typography.bodySmall,
+    fontSize: 13,
     fontWeight: '600',
     color: colors.sparkOrange,
   },

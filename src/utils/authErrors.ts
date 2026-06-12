@@ -21,7 +21,12 @@ export function formatAuthErrorForUser(error: unknown): string {
 
   const lower = message.toLowerCase();
 
-  if (lower.includes('load failed') || lower.includes('failed to fetch')) {
+  if (
+    lower.includes('load failed') ||
+    lower.includes('failed to fetch') ||
+    lower.includes('hostname could not be found') ||
+    lower.includes('network request failed')
+  ) {
     return 'Unable to reach the account server. Check your internet connection and try again.';
   }
 

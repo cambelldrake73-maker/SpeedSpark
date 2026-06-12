@@ -4,6 +4,8 @@ import type {
   BlockedUser,
   DateFeedback,
   DatingPreferences,
+  Match,
+  Message,
   OnboardingData,
   UserProfile,
 } from '../types';
@@ -21,12 +23,14 @@ import {
   savePreferencesFields,
   saveProfileFields,
   unblockUserInSupabase,
+  updateTextNotificationsEnabled,
 } from '../services';
 import type { BlockUserOptions, AccountStatus } from '../types/safety';
 import { DEFAULT_MATCHING_PRIORITY_ORDER } from '../constants/matchingPriorities';
 import {
   isPreferencesComplete,
   isProfileComplete,
+  isReturningAccountReady,
   resolveOnboardingRoute,
   type OnboardingRoute,
 } from '../utils/onboardingStatus';
@@ -74,6 +78,11 @@ interface AppContextValue {
   blockUser: (user: Pick<UserProfile, 'id' | 'name'>, options?: BlockUserOptions) => void;
   unblockUser: (userId: string) => void;
   isBlocked: (userId: string) => boolean;
+  demoMatches: Match[];
+  demoMessagesByMatch: Record<string, Message[]>;
+  registerDemoMatch: (partner: UserProfile) => string;
+  removeDemoMatch: (matchId: string) => void;
+  sendDemoMessage: (matchId: string, message: Message) => void;
 }
 
 const defaultPreferences: Partial<DatingPreferences> = {
@@ -86,8 +95,6 @@ const defaultPreferences: Partial<DatingPreferences> = {
   preferredLookingFor: [],
   preferredQueerRoles: [],
   preferredPresentationTags: [],
-  dealbreakers: [],
-  niceToHaves: [],
   matchingPriorityOrder: [...DEFAULT_MATCHING_PRIORITY_ORDER],
 };
 
@@ -114,8 +121,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [lastFeedback, setLastFeedback] = useState<DateFeedback | null>(null);
   const [partnerFeedback, setPartnerFeedback] = useState<DateFeedback | null>(null);
   const [windowIdentityVerified, setWindowIdentityVerified] = useState(false);
-  const [textNotificationsEnabled, setTextNotificationsEnabled] = useState(true);
+  const [textNotificationsEnabled, setTextNotificationsEnabledState] = useState(true);
+
+  const setTextNotificationsEnabled = useCallback(
+    (enabled: boolean) => {
+      setTextNotificationsEnabledState(enabled);
+      const userId = currentUser.id;
+      if (!isSupabaseConfigured || !userId || userId === 'user-1') {
+        return;
+      }
+      void updateTextNotificationsEnabled(userId, enabled).catch((error) => {
+        console.warn('[SpeedSpark] Failed to save text notification preference', error);
+      });
+    },
+    [currentUser.id],
+  );
   const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
+  const [demoMatches, setDemoMatches] = useState<Match[]>([]);
+  const [demoMessagesByMatch, setDemoMessagesByMatch] = useState<Record<string, Message[]>>({});
   const [isHydrating, setIsHydrating] = useState(false);
   const [hydrationError, setHydrationError] = useState<string | null>(null);
 
@@ -243,6 +266,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const saved = await savePreferencesFields(userId, prefs);
       setPreferences(saved);
       setOnboarding((prev) => ({ ...prev, preferences: saved }));
+
+      if (prefs.preferredLookingFor !== undefined) {
+        const profileSaved = await saveProfileFields(userId, {
+          interestedInGenders: prefs.preferredLookingFor,
+        });
+        setCurrentUser(profileSaved);
+        setOnboarding((prev) => ({ ...prev, profile: profileSaved }));
+      }
+
       return saved;
     },
     [currentUser.id, onboarding.profile.id, preferences, updatePreferences],
@@ -294,12 +326,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         throw new Error('This account is no longer active. Contact support if you need help.');
       }
 
-      const onboarded = Boolean(
+      let onboarded = Boolean(
         (profileRow as { onboarded_at?: string | null } | null)?.onboarded_at,
       );
       const activeProfile = profile ?? onboarding.profile;
       const profileComplete = isProfileComplete(activeProfile);
       const preferencesComplete = isPreferencesComplete(mergedPrefs);
+      const returningReady = isReturningAccountReady(activeProfile, mergedPrefs);
+
+      if (!onboarded && returningReady) {
+        await markOnboardingComplete(userId);
+        onboarded = true;
+      }
+
       const nextRoute = resolveOnboardingRoute({
         isOnboarded: onboarded,
         profile: activeProfile,
@@ -308,7 +347,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setIsOnboarded(onboarded);
       setIsLoggedIn(true);
-      setTextNotificationsEnabled(
+      setTextNotificationsEnabledState(
         (profileRow as { text_notifications_enabled?: boolean } | null)
           ?.text_notifications_enabled ?? true,
       );
@@ -347,18 +386,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       heightInches: 66,
       genderIdentity: 'non_binary',
       sexualOrientation: 'queer',
-      lookingFor: ['dates', 'relationship'],
+      datingIntentions: ['dates', 'relationship'],
+      interestedInGenders: ['non_binary', 'woman', 'man'],
       queerRoles: ['verse'],
-      presentationTags: ['no_label'],
-      personalityTags: ['Creative', 'Chill', 'Romantic'],
-      lifestyleTags: ['Non-smoker', 'Monogamous', 'Out and proud'],
+      presentationTags: [],
+      personalityTags: [],
+      lifestyleTags: ['Monogamous', 'Creative', 'Thoughtful', 'Chill', 'Romantic'],
       verificationStatus: 'verified',
     });
     setPreferences({
       ...defaultPreferences,
-      preferredLookingFor: ['dates', 'relationship'],
+      preferredLookingFor: ['non_binary', 'woman', 'man'],
       preferredQueerRoles: ['verse', 'side'],
-      niceToHaves: ['Verified profile', 'Romantic', 'Monogamous'],
     });
   }, []);
 
@@ -372,8 +411,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLastFeedback(null);
     setPartnerFeedback(null);
     setWindowIdentityVerified(false);
-    setTextNotificationsEnabled(true);
+    setTextNotificationsEnabledState(true);
     setBlockedUsers([]);
+    setDemoMatches([]);
+    setDemoMessagesByMatch({});
   }, []);
 
   const deleteAccount = useCallback(async () => {
@@ -423,6 +464,60 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [blockedUsers],
   );
 
+  const registerDemoMatch = useCallback((partner: UserProfile): string => {
+    let matchId = '';
+    setDemoMatches((prev) => {
+      const existing = prev.find((match) => match.user.id === partner.id);
+      if (existing) {
+        matchId = existing.id;
+        return prev;
+      }
+      matchId = `match-${partner.id}-${Date.now()}`;
+      return [
+        {
+          id: matchId,
+          user: partner,
+          matchedAt: new Date().toISOString(),
+        },
+        ...prev,
+      ];
+    });
+    setDemoMessagesByMatch((prev) => {
+      if (matchId && prev[matchId] === undefined) {
+        return { ...prev, [matchId]: [] };
+      }
+      return prev;
+    });
+    return matchId;
+  }, []);
+
+  const removeDemoMatch = useCallback((matchId: string) => {
+    setDemoMatches((prev) => prev.filter((match) => match.id !== matchId));
+    setDemoMessagesByMatch((prev) => {
+      const next = { ...prev };
+      delete next[matchId];
+      return next;
+    });
+  }, []);
+
+  const sendDemoMessage = useCallback((matchId: string, message: Message) => {
+    setDemoMessagesByMatch((prev) => ({
+      ...prev,
+      [matchId]: [...(prev[matchId] ?? []), message],
+    }));
+    setDemoMatches((prev) =>
+      prev.map((match) =>
+        match.id === matchId
+          ? {
+              ...match,
+              lastMessage: message.text,
+              lastMessageAt: message.sentAt,
+            }
+          : match,
+      ),
+    );
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -462,6 +557,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         blockUser,
         unblockUser,
         isBlocked,
+        demoMatches,
+        demoMessagesByMatch,
+        registerDemoMatch,
+        removeDemoMatch,
+        sendDemoMessage,
       }}
     >
       {children}

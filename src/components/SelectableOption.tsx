@@ -8,7 +8,7 @@ interface SelectableOptionProps {
   onPress: () => void;
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
-  description: string;
+  description?: string;
 }
 
 export function SelectableOption({
@@ -33,8 +33,10 @@ export function SelectableOption({
         <Ionicons name={icon} size={22} color={selected ? colors.sparkOrange : colors.textMuted} />
       </View>
       <View style={styles.copy}>
-        <Text style={[styles.title, selected && styles.titleSelected]}>{title}</Text>
-        <Text style={styles.description}>{description}</Text>
+        <Text style={[styles.title, selected && styles.titleSelected, !description && styles.titleOnly]}>
+          {title}
+        </Text>
+        {description ? <Text style={styles.description}>{description}</Text> : null}
       </View>
       <View style={[styles.radio, selected && styles.radioSelected]}>
         {selected ? <View style={styles.radioDot} /> : null}
@@ -87,6 +89,9 @@ const styles = StyleSheet.create({
   },
   titleSelected: {
     color: colors.text,
+  },
+  titleOnly: {
+    marginBottom: 0,
   },
   description: {
     ...typography.caption,

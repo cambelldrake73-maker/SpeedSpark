@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { StyleSheet } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import {
   Button,
   ChipGrid,
@@ -12,28 +12,28 @@ import {
   ScreenContainer,
   SectionHeader,
   TagSelector,
-  BrandLogo,
+  AuthFlowLogo,
 } from '../components';
 import {
   GENDER_OPTIONS,
-  LIFESTYLE_TAG_OPTIONS,
+  LIFESTYLE_TAG_MAX,
   LOOKING_FOR_OPTIONS,
   ORIENTATION_OPTIONS,
-  PERSONALITY_TAGS,
+  LIFESTYLE_TAG_OPTIONS,
+  normalizeLifestyleTags,
   PRESENTATION_OPTIONS,
 } from '../constants/options';
 import { spacing } from '../constants/theme';
+import {
+  ONBOARDING_TOTAL_STEPS,
+  onboardingStepForProfileWizard,
+} from '../constants/onboardingProgress';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { syncProfilePhotoSlots } from '../services/profilePhotos';
 import { isSupabaseConfigured } from '../services/supabaseEnv';
 import { formatAuthErrorForUser } from '../utils/authErrors';
-import type {
-  GenderIdentity,
-  LookingFor,
-  PresentationTag,
-  SexualOrientation,
-} from '../types';
+import type { GenderIdentity, LookingFor, PresentationTag, SexualOrientation } from '../types';
 import type { ProfileCreationScreenProps } from '../navigation/types';
 import {
   inchesToFeetInches,
@@ -44,14 +44,13 @@ import type { ResolvedLocation } from '../utils/deviceLocation';
 
 const MAX_PHOTOS = 6;
 const REQUIRED_PHOTOS = 3;
+const PROFILE_WIZARD_STEPS = 4;
+const USE_NATIVE_PROFILE_STEPS = Platform.OS === 'ios' || Platform.OS === 'android';
 
-type ProfileField =
-  | 'photos'
-  | 'name'
-  | 'age'
-  | 'location'
-  | 'height'
-  | 'lookingFor';
+/** Native wizard always scrolls — avoids flex/keyboard clashes on About you. */
+const PROFILE_SCROLL_STEPS = new Set([0, 1, 2, 3]);
+
+type ProfileField = 'photos' | 'name' | 'age' | 'location' | 'height';
 
 function getProfileValidation(
   input: {
@@ -60,7 +59,6 @@ function getProfileValidation(
     deviceLocation: ResolvedLocation | null;
     heightFeet: string;
     heightInches: string;
-    lookingFor: LookingFor[];
     photos: string[];
   },
   options?: { requirePhotos?: boolean },
@@ -77,8 +75,8 @@ function getProfileValidation(
   }
 
   if (!input.name.trim()) {
-    errors.name = 'Enter your name';
-    banner.push('Enter your name');
+    errors.name = 'Enter your display name';
+    banner.push('Enter your display name');
   }
 
   const ageNum = parseInt(input.age, 10);
@@ -98,13 +96,48 @@ function getProfileValidation(
     banner.push(heightError);
   }
 
-  if (input.lookingFor.length === 0) {
-    errors.lookingFor = 'Select at least one option';
-    banner.push('Select at least one "Looking for" option');
+  return { errors, banner };
+}
+
+function getProfileStepValidation(
+  step: number,
+  input: Parameters<typeof getProfileValidation>[0],
+  options?: Parameters<typeof getProfileValidation>[1],
+) {
+  const full = getProfileValidation(input, options);
+  const stepFields: Record<number, ProfileField[]> = {
+    0: ['name', 'age', 'location', 'height'],
+    1: ['photos'],
+    2: [],
+    3: [],
+  };
+  const allowed = new Set(stepFields[step] ?? []);
+  const errors: Partial<Record<ProfileField, string>> = {};
+  const banner: string[] = [];
+
+  for (const field of allowed) {
+    if (full.errors[field]) {
+      errors[field] = full.errors[field];
+      banner.push(full.errors[field]!);
+    }
   }
 
   return { errors, banner };
 }
+
+const STEP_TITLES = [
+  'About you',
+  'Your photos',
+  'Who you are',
+  'How you show up',
+];
+
+const STEP_SUBTITLES = [
+  undefined,
+  'Add photos for your profile.',
+  undefined,
+  undefined,
+];
 
 export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps) {
   const { onboarding, updateProfile, saveProfileToServer } = useApp();
@@ -112,11 +145,14 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
   const profile = onboarding.profile;
   const photosOptional = isSupabaseConfigured;
 
+  const [wizardStep, setWizardStep] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [stepAttempted, setStepAttempted] = useState(false);
   const [name, setName] = useState(profile.name ?? '');
-  const [age, setAge] = useState(profile.age ? String(profile.age) : '');
+  const accountAge = onboarding.account?.age ?? profile.age ?? 0;
+  const age = accountAge > 0 ? String(accountAge) : '';
   const [deviceLocation, setDeviceLocation] = useState<ResolvedLocation | null>(() => {
     if (
       profile.location &&
@@ -142,39 +178,53 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
   const [sexualOrientation, setSexualOrientation] = useState<SexualOrientation>(
     profile.sexualOrientation ?? 'prefer_not_to_say',
   );
-  const [lookingFor, setLookingFor] = useState<LookingFor[]>(profile.lookingFor ?? []);
+  const [datingIntentions, setDatingIntentions] = useState<LookingFor[]>(
+    profile.datingIntentions ?? [],
+  );
   const [presentationTags, setPresentationTags] = useState<PresentationTag[]>(
     profile.presentationTags ?? [],
   );
-  const [personalityTags, setPersonalityTags] = useState<string[]>(
-    profile.personalityTags ?? [],
+  const [lifestyleTags, setLifestyleTags] = useState<string[]>(() =>
+    normalizeLifestyleTags(profile.lifestyleTags, profile.personalityTags),
   );
-  const [lifestyleTags, setLifestyleTags] = useState<string[]>(profile.lifestyleTags ?? []);
   const [photos, setPhotos] = useState<string[]>(() =>
     Array.from({ length: MAX_PHOTOS }, (_, i) => profile.photos?.[i] ?? ''),
   );
 
-  const validation = useMemo(
-    () =>
-      getProfileValidation(
-        {
-          name,
-          age,
-          deviceLocation,
-          heightFeet,
-          heightInches,
-          lookingFor,
-          photos,
-        },
-        { requirePhotos: !photosOptional },
-      ),
-    [name, age, deviceLocation, heightFeet, heightInches, lookingFor, photos, photosOptional],
+  const validationInput = useMemo(
+    () => ({
+      name,
+      age,
+      deviceLocation,
+      heightFeet,
+      heightInches,
+      photos,
+    }),
+    [name, age, deviceLocation, heightFeet, heightInches, photos],
   );
 
-  const showErrors = submitAttempted;
-  const fieldErrors = showErrors ? validation.errors : {};
+  const validationOptions = useMemo(
+    () => ({ requirePhotos: !photosOptional }),
+    [photosOptional],
+  );
+
+  const validation = useMemo(
+    () => getProfileValidation(validationInput, validationOptions),
+    [validationInput, validationOptions],
+  );
+
+  const stepValidation = useMemo(
+    () =>
+      USE_NATIVE_PROFILE_STEPS
+        ? getProfileStepValidation(wizardStep, validationInput, validationOptions)
+        : validation,
+    [wizardStep, validationInput, validationOptions, validation],
+  );
+
+  const showErrors = USE_NATIVE_PROFILE_STEPS ? stepAttempted : submitAttempted;
+  const fieldErrors = showErrors ? stepValidation.errors : {};
   const bannerMessages = [
-    ...(showErrors ? validation.banner : []),
+    ...(showErrors ? stepValidation.banner : []),
     ...(saveError ? [saveError] : []),
   ];
 
@@ -182,24 +232,17 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
     setter(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   };
 
-  const handleContinue = async () => {
+  const finishProfile = async () => {
     setSubmitAttempted(true);
     setSaveError(null);
 
-    const result = getProfileValidation(
-      {
-        name,
-        age,
-        deviceLocation,
-        heightFeet,
-        heightInches,
-        lookingFor,
-        photos,
-      },
-      { requirePhotos: !photosOptional },
-    );
-
+    const result = getProfileValidation(validationInput, validationOptions);
     if (result.banner.length > 0) return;
+
+    if (datingIntentions.length === 0) {
+      setSaveError('Select at least one dating intention');
+      return;
+    }
 
     const ageNum = parseInt(age, 10);
     const parsedHeight = parseFeetInchesFields(heightFeet, heightInches)!;
@@ -216,10 +259,11 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
       photos: photos.filter(Boolean),
       genderIdentity,
       sexualOrientation,
-      lookingFor,
+      datingIntentions,
+      interestedInGenders: [],
       queerRoles: [],
       presentationTags,
-      personalityTags,
+      personalityTags: [],
       lifestyleTags,
     };
 
@@ -243,22 +287,169 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
     navigation.navigate('Preferences');
   };
 
-  const liveHeightError =
-    heightFeet.trim() || heightInches.trim() || showErrors
-      ? validateFeetInchesFields(heightFeet, heightInches)
-      : null;
+  const handleContinue = () => {
+    if (USE_NATIVE_PROFILE_STEPS) {
+      setStepAttempted(true);
+      setSaveError(null);
+      const result = getProfileStepValidation(wizardStep, validationInput, validationOptions);
+      if (result.banner.length > 0) return;
 
-  return (
-    <ScreenContainer scroll contentStyle={styles.content}>
-      <BrandLogo size="auth" style={styles.logo} />
-      <OnboardingStep
-        flowLabel="Required before you join"
-        currentStep={1}
-        totalSteps={3}
-        title="Build your profile"
-        subtitle="Complete this before entering any date window. Presentation, intentions, and who you're into — so you're never dumped in the wrong pool."
+      if (wizardStep === 2 && datingIntentions.length === 0) {
+        setSaveError('Select at least one dating intention');
+        return;
+      }
+
+      if (wizardStep < PROFILE_WIZARD_STEPS - 1) {
+        setStepAttempted(false);
+        setWizardStep((step) => step + 1);
+        return;
+      }
+
+      void finishProfile();
+      return;
+    }
+
+    void finishProfile();
+  };
+
+  const handleBack = () => {
+    if (USE_NATIVE_PROFILE_STEPS && wizardStep > 0) {
+      setStepAttempted(false);
+      setSaveError(null);
+      setWizardStep((step) => step - 1);
+      return;
+    }
+    navigation.goBack();
+  };
+
+  const renderBasics = () => (
+    <>
+      <Input
+        label="Display name"
+        placeholder="What should we call you?"
+        value={name}
+        onChangeText={setName}
+        error={fieldErrors.name}
       />
+      <Input
+        label="Age"
+        placeholder="25"
+        value={age}
+        keyboardType="number-pad"
+        locked
+        hint={fieldErrors.age ? undefined : 'Set when you signed up — cannot be changed here'}
+        error={fieldErrors.age}
+      />
+    </>
+  );
 
+  const renderLocation = () => (
+    <>
+      <LocationSetting
+        value={deviceLocation}
+        onChange={setDeviceLocation}
+        error={fieldErrors.location}
+      />
+      <HeightFields
+        label="Height"
+        feet={heightFeet}
+        inches={heightInches}
+        onFeetChange={setHeightFeet}
+        onInchesChange={setHeightInches}
+        error={showErrors ? fieldErrors.height : undefined}
+      />
+    </>
+  );
+
+  const renderPhotos = (showHeader = true) => (
+    <>
+      {showHeader ? (
+        <SectionHeader
+          title="Photos"
+          hint={
+            photosOptional
+              ? 'Photos are optional for now — add up to 6 if you like'
+              : showErrors
+                ? undefined
+                : 'Tap any slot to upload or take a picture'
+          }
+          error={fieldErrors.photos}
+        />
+      ) : null}
+      <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
+    </>
+  );
+
+  const renderAboutYou = () => (
+    <>
+      {renderBasics()}
+      {renderLocation()}
+    </>
+  );
+
+  const renderIdentity = () => (
+    <View style={styles.tightStep}>
+      <SectionHeader title="Gender identity" dense first />
+      <TagSelector
+        options={GENDER_OPTIONS}
+        selected={[genderIdentity]}
+        onToggle={(v) => setGenderIdentity(v)}
+        multiSelect={false}
+        compact
+      />
+      <SectionHeader title="Orientation" dense />
+      <TagSelector
+        options={ORIENTATION_OPTIONS}
+        selected={[sexualOrientation]}
+        onToggle={(v) => setSexualOrientation(v)}
+        multiSelect={false}
+        compact
+      />
+      <SectionHeader title="Dating intentions" dense />
+      <TagSelector
+        options={LOOKING_FOR_OPTIONS}
+        selected={datingIntentions}
+        onToggle={(v) => toggle(datingIntentions, v, setDatingIntentions)}
+        compact
+      />
+    </View>
+  );
+
+  const renderTags = () => (
+    <View style={styles.tightStep}>
+      <SectionHeader title="Presentation" dense first />
+      <TagSelector
+        options={PRESENTATION_OPTIONS}
+        selected={presentationTags}
+        onToggle={(v) => toggle(presentationTags, v, setPresentationTags)}
+        compact
+      />
+      <SectionHeader title="Lifestyle & values" dense />
+      <ChipGrid
+        options={LIFESTYLE_TAG_OPTIONS}
+        selected={lifestyleTags}
+        onToggle={(tag) => toggle(lifestyleTags, tag, setLifestyleTags)}
+        maxSelect={LIFESTYLE_TAG_MAX}
+      />
+    </View>
+  );
+
+  const renderNativeStep = () => {
+    switch (wizardStep) {
+      case 0:
+        return renderAboutYou();
+      case 1:
+        return renderPhotos(false);
+      case 2:
+        return renderIdentity();
+      case 3:
+      default:
+        return renderTags();
+    }
+  };
+
+  const renderScrollForm = () => (
+    <>
       <SectionHeader
         title="Photos"
         hint={
@@ -266,115 +457,61 @@ export function ProfileCreationScreen({ navigation }: ProfileCreationScreenProps
             ? 'Photos are optional for now — add up to 6 if you like'
             : showErrors
               ? undefined
-              : `Add at least ${REQUIRED_PHOTOS} photos — tap any slot to upload or take a picture`
+              : 'Tap any slot to upload or take a picture'
         }
         error={fieldErrors.photos}
       />
       <PhotoPickerPlaceholder photos={photos} onPhotosChange={setPhotos} maxPhotos={MAX_PHOTOS} />
+      {renderBasics()}
+      {renderLocation()}
+      {renderIdentity()}
+      {renderTags()}
+    </>
+  );
 
-      <SectionHeader title="Basics" />
-      <Input
-        label="Name"
-        placeholder="What should we call you?"
-        value={name}
-        onChangeText={setName}
-        hint={fieldErrors.name ? undefined : 'Pre-filled from your account — change your display name anytime'}
-        error={fieldErrors.name}
-      />
-      <Input
-        label="Age"
-        placeholder="25"
-        value={age}
-        onChangeText={setAge}
-        keyboardType="number-pad"
-        hint={fieldErrors.age ? undefined : 'From your account — must be 18+'}
-        error={fieldErrors.age}
-      />
-      <LocationSetting
-        value={deviceLocation}
-        onChange={setDeviceLocation}
-        error={fieldErrors.location}
-      />
+  const nativeScroll = USE_NATIVE_PROFILE_STEPS && PROFILE_SCROLL_STEPS.has(wizardStep);
+  const stepTitle = USE_NATIVE_PROFILE_STEPS ? STEP_TITLES[wizardStep] ?? 'Build your profile' : 'Build your profile';
+  const stepSubtitle = USE_NATIVE_PROFILE_STEPS ? STEP_SUBTITLES[wizardStep] : undefined;
+  const continueLabel = USE_NATIVE_PROFILE_STEPS
+    ? wizardStep < PROFILE_WIZARD_STEPS - 1
+      ? 'Continue'
+      : 'Continue to match preferences'
+    : 'Continue to match preferences';
 
-      <HeightFields
-        label="Height"
-        feet={heightFeet}
-        inches={heightInches}
-        onFeetChange={setHeightFeet}
-        onInchesChange={setHeightInches}
-        error={showErrors ? fieldErrors.height : liveHeightError ?? undefined}
-      />
-
-      <SectionHeader title="Gender identity" />
-      <TagSelector
-        options={GENDER_OPTIONS}
-        selected={[genderIdentity]}
-        onToggle={(v) => setGenderIdentity(v)}
-        multiSelect={false}
-      />
-
-      <SectionHeader title="Sexual orientation" />
-      <TagSelector
-        options={ORIENTATION_OPTIONS}
-        selected={[sexualOrientation]}
-        onToggle={(v) => setSexualOrientation(v)}
-        multiSelect={false}
-      />
-
-      <SectionHeader
-        title="Looking for"
-        hint={
-          showErrors
-            ? undefined
-            : 'Select all that apply — relationship-minded, platonic, and casual are all valid'
+  return (
+    <ScreenContainer
+      scroll={!USE_NATIVE_PROFILE_STEPS || nativeScroll}
+      scrollToTopKey={USE_NATIVE_PROFILE_STEPS ? wizardStep : undefined}
+      scrollToTopOnFocus
+      contentStyle={styles.content}
+    >
+      {(!USE_NATIVE_PROFILE_STEPS || wizardStep === 0) && <AuthFlowLogo />}
+      <OnboardingStep
+        currentStep={
+          USE_NATIVE_PROFILE_STEPS ? onboardingStepForProfileWizard(wizardStep) : 1
         }
-        error={fieldErrors.lookingFor}
-      />
-      <TagSelector
-        options={LOOKING_FOR_OPTIONS}
-        selected={lookingFor}
-        onToggle={(v) => toggle(lookingFor, v, setLookingFor)}
-      />
-
-      <SectionHeader
-        title="Presentation"
-        hint="Masc, fem, or no label — however you show up"
-      />
-      <TagSelector
-        options={PRESENTATION_OPTIONS}
-        selected={presentationTags}
-        onToggle={(v) => toggle(presentationTags, v, setPresentationTags)}
+        totalSteps={ONBOARDING_TOTAL_STEPS}
+        title={stepTitle}
+        dense={USE_NATIVE_PROFILE_STEPS && (wizardStep === 2 || wizardStep === 3)}
+        subtitle={
+          USE_NATIVE_PROFILE_STEPS
+            ? stepSubtitle
+            : 'Complete this before entering any date window. Add who you are and how you show up — match preferences come next.'
+        }
       />
 
-      <SectionHeader title="Vibe & personality" hint="Pick up to 6 tags that feel like you" />
-      <ChipGrid
-        options={PERSONALITY_TAGS}
-        selected={personalityTags}
-        onToggle={(tag) => toggle(personalityTags, tag, setPersonalityTags)}
-        maxSelect={6}
-      />
-
-      <SectionHeader
-        title="Lifestyle & values"
-        hint="Honest tags about you — matches use these for dealbreakers and nice-to-haves"
-      />
-      <ChipGrid
-        options={LIFESTYLE_TAG_OPTIONS}
-        selected={lifestyleTags}
-        onToggle={(tag) => toggle(lifestyleTags, tag, setLifestyleTags)}
-        maxSelect={6}
-      />
+      {USE_NATIVE_PROFILE_STEPS ? renderNativeStep() : renderScrollForm()}
 
       <FormErrorBanner messages={bannerMessages} />
       <Button
-        title="Continue to match preferences"
+        title={continueLabel}
         onPress={handleContinue}
         size="lg"
         style={styles.btn}
         loading={isSaving}
         disabled={isSaving}
       />
-      <Button title="Back" onPress={() => navigation.goBack()} variant="ghost" />
+      <Button title="Back" onPress={handleBack} variant="ghost" />
     </ScreenContainer>
   );
 }
@@ -384,11 +521,11 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
-  logo: {
-    marginBottom: spacing.lg,
-  },
   btn: {
     marginTop: spacing.md,
     marginBottom: spacing.sm,
+  },
+  tightStep: {
+    gap: spacing.xs,
   },
 });

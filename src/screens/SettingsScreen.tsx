@@ -1,26 +1,102 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { Alert, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, ScreenContainer, SettingsRow, SettingsSection, SettingsToggleRow } from '../components';
+import { useFocusEffect } from '@react-navigation/native';
+import { Button, ScreenContainer, SettingsRow, SettingsSection } from '../components';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { formatAuthErrorForUser } from '../utils/authErrors';
+import {
+  canUsePushNotifications,
+  getPushPermissionStatus,
+  isPushUnavailableOnDevice,
+  isPushPlatform,
+  openAppNotificationSettings,
+  pushPermissionStatusLabel,
+  requestPushPermission,
+  type PushPermissionStatus,
+} from '../utils/pushNotifications';
 import type { SettingsScreenProps } from '../navigation/types';
 
-export function SettingsScreen({ navigation }: SettingsScreenProps) {
-  const {
-    currentUser,
-    logout,
-    deleteAccount,
-    textNotificationsEnabled,
-    setTextNotificationsEnabled,
-    blockedUsers,
-  } = useApp();
-  const { isSupabaseEnabled, signOut } = useAuth();
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+const pushPlatform = isPushPlatform();
 
-  const handleSignOut = async () => {
+export function SettingsScreen({ navigation }: SettingsScreenProps) {
+  const { currentUser, logout, deleteAccount, blockedUsers } = useApp();
+  const { isSupabaseEnabled, signOut } = useAuth();
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pushStatus, setPushStatus] = useState<PushPermissionStatus>('undetermined');
+
+  const refreshPushStatus = useCallback(async () => {
+    if (!canUsePushNotifications()) {
+      return;
+    }
+    setPushStatus(await getPushPermissionStatus());
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshPushStatus();
+    }, [refreshPushStatus]),
+  );
+
+  const promptOpenSettings = () => {
+    Alert.alert(
+      'Turn on notifications',
+      Platform.OS === 'ios'
+        ? 'Notifications are off for SpeedSpark. You can turn them on in Settings.'
+        : 'Notifications are off for SpeedSpark. You can turn them on in your device settings.',
+      [
+        { text: 'Not Now', style: 'cancel' },
+        { text: 'Open Settings', onPress: openAppNotificationSettings },
+      ],
+    );
+  };
+
+  const handleEnableNotifications = async () => {
+    if (!canUsePushNotifications()) {
+      return;
+    }
+
+    const currentStatus = await getPushPermissionStatus();
+    setPushStatus(currentStatus);
+
+    if (currentStatus === 'unavailable') {
+      promptOpenSettings();
+      return;
+    }
+
+    if (currentStatus === 'undetermined') {
+      const nextStatus = await requestPushPermission();
+      setPushStatus(nextStatus);
+      if (nextStatus === 'denied') {
+        promptOpenSettings();
+      }
+      return;
+    }
+
+    if (currentStatus === 'denied') {
+      promptOpenSettings();
+      return;
+    }
+
+    Alert.alert(
+      'Notifications enabled',
+      'To change alert types, open your device notification settings.',
+      [
+        { text: 'OK', style: 'cancel' },
+        { text: 'Open Settings', onPress: openAppNotificationSettings },
+      ],
+    );
+  };
+
+  const handleSignOut = () => {
+    setShowSignOutConfirm(true);
+  };
+
+  const confirmSignOut = async () => {
+    setShowSignOutConfirm(false);
     if (isSupabaseEnabled) {
       await signOut();
     }
@@ -47,7 +123,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
 
   return (
     <>
-    <ScreenContainer scroll contentStyle={styles.content}>
+    <ScreenContainer scroll={true} contentStyle={styles.content}>
       <View style={styles.header}>
         <Pressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -79,27 +155,29 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         <SettingsRow
           icon="options-outline"
           title="Match preferences"
-          subtitle="Age, distance, dealbreakers, and more"
+          subtitle="Age, distance, height, and more"
           onPress={() => navigation.navigate('Preferences', { fromSettings: true })}
           last
         />
       </SettingsSection>
 
       <SettingsSection title="Notifications">
-        <SettingsToggleRow
-          icon="chatbubble-outline"
-          title="Text messages"
-          subtitle="Texts when a speed date window is going live, plus reminders before it starts"
-          value={textNotificationsEnabled}
-          onValueChange={setTextNotificationsEnabled}
+        <SettingsRow
+          icon="notifications-outline"
+          title="Enable notifications"
+          compact
+          value={
+            pushPlatform
+              ? pushPermissionStatusLabel(pushStatus, {
+                  onSimulator: isPushUnavailableOnDevice(),
+                })
+              : undefined
+          }
+          onPress={canUsePushNotifications() ? () => void handleEnableNotifications() : undefined}
+          showChevron={canUsePushNotifications()}
           last
         />
       </SettingsSection>
-      <Text style={styles.notificationsNote}>
-        {Platform.OS === 'web'
-          ? 'On web, texts are how we let you know a window is about to go live. App push alerts are not available here.'
-          : 'In-app messages and live alerts use Apple push notifications — manage those in iOS Settings.'}
-      </Text>
 
       <SettingsSection title="App">
         <SettingsRow
@@ -156,37 +234,61 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
     </ScreenContainer>
 
       <Modal
+        visible={showSignOutConfirm}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowSignOutConfirm(false)}
+      >
+        <Pressable
+          style={styles.confirmOverlay}
+          onPress={() => setShowSignOutConfirm(false)}
+          accessibilityLabel="Dismiss sign out confirmation"
+        >
+          <Pressable style={styles.confirmCard} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.confirmTitle}>Sign out?</Text>
+            <Text style={styles.confirmText}>
+              You can sign back in anytime with your phone or email.
+            </Text>
+            <View style={styles.confirmActions}>
+              <Button
+                title="Cancel"
+                onPress={() => setShowSignOutConfirm(false)}
+                variant="outline"
+                size="sm"
+              />
+              <Button title="Sign out" onPress={() => void confirmSignOut()} size="sm" />
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
         visible={showDeleteConfirm}
         transparent
         animationType="fade"
         onRequestClose={() => setShowDeleteConfirm(false)}
       >
-        <View style={styles.modalOverlay}>
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={() => setShowDeleteConfirm(false)}
-            accessibilityLabel="Dismiss delete confirmation"
-          />
-          <View style={styles.modalCard}>
-            <View style={styles.modalIconWrap}>
-              <Ionicons name="warning-outline" size={28} color={colors.error} />
-            </View>
-            <Text style={styles.modalTitle}>Delete your account?</Text>
-            <Text style={styles.modalText}>
-              This permanently removes your profile, matches, and messages. This cannot be undone.
+        <Pressable
+          style={styles.confirmOverlay}
+          onPress={() => setShowDeleteConfirm(false)}
+          accessibilityLabel="Dismiss delete confirmation"
+        >
+          <Pressable style={styles.confirmCard} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.confirmTitle}>Delete your account?</Text>
+            <Text style={styles.confirmText}>
+              Your profile, matches, and messages will be permanently removed.
             </Text>
-            <View style={styles.modalActions}>
+            <View style={styles.confirmActions}>
               <Button
                 title="Cancel"
                 onPress={() => setShowDeleteConfirm(false)}
                 variant="outline"
-                size="md"
-                style={styles.modalBtn}
+                size="sm"
               />
-              <Button title="Delete account" onPress={confirmDelete} size="md" style={styles.modalBtn} />
+              <Button title="Delete" onPress={confirmDelete} size="sm" />
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </>
   );
@@ -246,64 +348,38 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 2,
   },
-  notificationsNote: {
-    ...typography.caption,
-    color: colors.textMuted,
-    lineHeight: 18,
-    marginTop: -spacing.sm,
-    marginBottom: spacing.lg,
-    marginHorizontal: spacing.xs,
-  },
-  modalOverlay: {
+  confirmOverlay: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFill,
     backgroundColor: colors.overlay,
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 400,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.error,
-    alignItems: 'center',
-  },
-  modalIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  confirmTitle: {
+    ...typography.body,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  confirmText: {
+    ...typography.caption,
+    color: colors.textSecondary,
+    lineHeight: 18,
     marginBottom: spacing.md,
   },
-  modalTitle: {
-    ...typography.subtitle,
-    color: colors.text,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  modalText: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: spacing.lg,
-  },
-  modalActions: {
+  confirmActions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    width: '100%',
-  },
-  modalBtn: {
-    flex: 1,
+    justifyContent: 'flex-end',
   },
   version: {
     ...typography.caption,

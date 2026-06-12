@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 
 interface ScaleRatingProps {
@@ -9,6 +9,8 @@ interface ScaleRatingProps {
   onChange: (value: number) => void;
   min?: number;
   max?: number;
+  /** Hides the large selected number — selection shown on chips only. */
+  compact?: boolean;
 }
 
 export function ScaleRating({
@@ -18,14 +20,15 @@ export function ScaleRating({
   onChange,
   min = 1,
   max = 10,
+  compact = false,
 }: ScaleRatingProps) {
   const options = Array.from({ length: max - min + 1 }, (_, i) => min + i);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, compact && styles.containerCompact]}>
       <Text style={styles.label}>{label}</Text>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
-      {value > 0 ? <Text style={styles.selectedValue}>{value}</Text> : null}
+      {!compact && value > 0 ? <Text style={styles.selectedValue}>{value}</Text> : null}
       <View style={styles.grid}>
         {options.map((n) => (
           <Pressable
@@ -39,10 +42,6 @@ export function ScaleRating({
           </Pressable>
         ))}
       </View>
-      <View style={styles.scaleLabels}>
-        <Text style={styles.scaleEdge}>{min}</Text>
-        <Text style={styles.scaleEdge}>{max}</Text>
-      </View>
     </View>
   );
 }
@@ -50,6 +49,9 @@ export function ScaleRating({
 const styles = StyleSheet.create({
   container: {
     marginBottom: spacing.md,
+  },
+  containerCompact: {
+    marginBottom: 0,
   },
   label: {
     ...typography.bodySmall,
@@ -64,12 +66,14 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   selectedValue: {
-    ...typography.title,
     fontSize: 36,
+    lineHeight: 44,
+    fontWeight: '700',
     color: colors.sparkOrange,
     textAlign: 'center',
     marginBottom: spacing.sm,
     fontVariant: ['tabular-nums'],
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
   },
   grid: {
     flexDirection: 'row',
@@ -92,21 +96,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentLight,
   },
   chipText: {
-    ...typography.body,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '600',
     color: colors.textSecondary,
+    textAlign: 'center',
+    ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
   },
   chipTextActive: {
     color: colors.text,
-  },
-  scaleLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.xs,
-  },
-  scaleEdge: {
-    ...typography.caption,
-    color: colors.textMuted,
   },
 });

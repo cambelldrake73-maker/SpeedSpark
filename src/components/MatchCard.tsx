@@ -5,8 +5,7 @@ import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import type { UserProfile } from '../types';
 import {
   GENDER_OPTIONS,
-  LOOKING_FOR_OPTIONS,
-  ORIENTATION_OPTIONS,
+  INTERESTED_IN_GENDER_OPTIONS,
   PRESENTATION_OPTIONS,
 } from '../constants/options';
 
@@ -24,9 +23,7 @@ function getLabel<T extends string>(
 }
 
 export function MatchCard({ user, subtitle, compact = false }: MatchCardProps) {
-  const presLabels = user.presentationTags
-    .filter((p) => p !== 'prefer_not_to_say')
-    .map((p) => getLabel(PRESENTATION_OPTIONS, p));
+  const presLabels = user.presentationTags.map((p) => getLabel(PRESENTATION_OPTIONS, p));
 
   return (
     <View style={[styles.card, compact && styles.cardCompact]}>
@@ -48,14 +45,9 @@ export function MatchCard({ user, subtitle, compact = false }: MatchCardProps) {
         <View style={styles.tag}>
           <Text style={styles.tagText}>{getLabel(GENDER_OPTIONS, user.genderIdentity)}</Text>
         </View>
-        <View style={styles.tag}>
-          <Text style={styles.tagText}>
-            {getLabel(ORIENTATION_OPTIONS, user.sexualOrientation)}
-          </Text>
-        </View>
-        {user.lookingFor.slice(0, 2).map((lf) => (
-          <View key={lf} style={styles.tag}>
-            <Text style={styles.tagText}>{getLabel(LOOKING_FOR_OPTIONS, lf)}</Text>
+        {user.interestedInGenders.slice(0, 2).map((gender) => (
+          <View key={gender} style={styles.tag}>
+            <Text style={styles.tagText}>{getLabel(INTERESTED_IN_GENDER_OPTIONS, gender)}</Text>
           </View>
         ))}
         {presLabels.map((label) => (

@@ -1,10 +1,9 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
-  Dimensions,
   Image,
+  LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { borderRadius, colors, spacing, typography } from '../constants/theme';
 import {
   GENDER_OPTIONS,
+  INTERESTED_IN_GENDER_OPTIONS,
   LOOKING_FOR_OPTIONS,
   ORIENTATION_OPTIONS,
   PRESENTATION_OPTIONS,
@@ -24,6 +24,8 @@ import { formatHeightInches } from '../utils/heightFormat';
 
 interface DatingProfileCardProps {
   user: UserProfile;
+  /** Lighter layout for post-date feedback — swipeable photos + full details on page. */
+  variant?: 'full' | 'compact';
 }
 
 function getLabel<T extends string>(
@@ -33,71 +35,89 @@ function getLabel<T extends string>(
   return options.find((o) => o.value === value)?.label ?? value;
 }
 
-export function DatingProfileCard({ user }: DatingProfileCardProps) {
+export function DatingProfileCard({ user, variant = 'full' }: DatingProfileCardProps) {
+  const isCompact = variant === 'compact';
   const photos = useMemo(
     () => (user.photos.filter(Boolean).length > 0 ? user.photos.filter(Boolean) : ['']),
     [user.photos],
   );
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [frameWidth, setFrameWidth] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
-  const cardWidth = Dimensions.get('window').width;
-  const photoWidth = Math.min(cardWidth - spacing.md * 2, 520);
+
+  const onFrameLayout = (event: LayoutChangeEvent) => {
+    const width = Math.round(event.nativeEvent.layout.width);
+    if (width > 0 && width !== frameWidth) {
+      setFrameWidth(width);
+    }
+  };
 
   const onPhotoScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.round(event.nativeEvent.contentOffset.x / photoWidth);
+    if (frameWidth <= 0) {
+      return;
+    }
+    const index = Math.round(event.nativeEvent.contentOffset.x / frameWidth);
     setPhotoIndex(index);
   };
 
-  const presLabels = user.presentationTags
-    .filter((p) => p !== 'prefer_not_to_say')
-    .map((p) => getLabel(PRESENTATION_OPTIONS, p));
+  const presLabels = user.presentationTags.map((p) => getLabel(PRESENTATION_OPTIONS, p));
+  const intentionLabels = user.datingIntentions.map((i) => getLabel(LOOKING_FOR_OPTIONS, i));
+  const interestedInLabels = user.interestedInGenders.map((g) =>
+    getLabel(INTERESTED_IN_GENDER_OPTIONS, g),
+  );
 
   return (
     <View style={styles.card}>
-      <View style={[styles.photoFrame, { width: photoWidth }]}>
-        <ScrollView
-          ref={scrollRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={onPhotoScroll}
-          style={styles.photoScroll}
-        >
-          {photos.map((uri, index) => (
-            <View key={`${uri}-${index}`} style={[styles.photoSlide, { width: photoWidth }]}>
-              {uri ? (
-                <Image source={{ uri }} style={styles.photo} resizeMode="cover" />
-              ) : (
-                <View style={styles.photoFallback}>
-                  <Ionicons name="person" size={64} color={colors.textMuted} />
+      <View style={[styles.photoFrame, isCompact && styles.photoFrameCompact]} onLayout={onFrameLayout}>
+        {frameWidth > 0 ? (
+          <ScrollView
+            ref={scrollRef}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onMomentumScrollEnd={onPhotoScroll}
+            style={styles.photoScroll}
+          >
+            {photos.map((uri, index) => (
+              <View key={`${uri}-${index}`} style={[styles.photoSlide, { width: frameWidth }]}>
+                {uri ? (
+                  <Image source={{ uri }} style={styles.photo} resizeMode="cover" />
+                ) : (
+                  <View style={styles.photoFallback}>
+                    <Ionicons name="person" size={64} color={colors.textMuted} />
+                  </View>
+                )}
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.85)']}
+                  style={styles.photoGradient}
+                />
+                <View style={styles.photoOverlay}>
+                  <View style={styles.nameRow}>
+                    <Text style={[styles.name, isCompact && styles.nameCompact]}>
+                      {user.name}
+                      {user.age > 0 ? `, ${user.age}` : ''}
+                    </Text>
+                    {user.verificationStatus === 'verified' && (
+                      <View style={styles.verifiedBadge}>
+                        <Ionicons name="checkmark-circle" size={18} color={colors.success} />
+                      </View>
+                    )}
+                  </View>
+                  {user.location ? (
+                    <Text style={styles.location}>{user.location}</Text>
+                  ) : null}
+                  {!isCompact && user.heightInches ? (
+                    <Text style={styles.meta}>{formatHeightInches(user.heightInches)}</Text>
+                  ) : null}
                 </View>
-              )}
-              <LinearGradient
-                colors={['transparent', 'rgba(0,0,0,0.85)']}
-                style={styles.photoGradient}
-              />
-              <View style={styles.photoOverlay}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.name}>
-                    {user.name}
-                    {user.age > 0 ? `, ${user.age}` : ''}
-                  </Text>
-                  {user.verificationStatus === 'verified' && (
-                    <View style={styles.verifiedBadge}>
-                      <Ionicons name="checkmark-circle" size={18} color={colors.success} />
-                    </View>
-                  )}
-                </View>
-                {user.location ? <Text style={styles.location}>{user.location}</Text> : null}
-                {user.heightInches ? (
-                  <Text style={styles.meta}>{formatHeightInches(user.heightInches)}</Text>
-                ) : null}
               </View>
-            </View>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={[styles.photoSlide, styles.photoPlaceholder]} />
+        )}
 
-        {photos.length > 1 && (
+        {photos.length > 1 && frameWidth > 0 ? (
           <View style={styles.dots}>
             {photos.map((_, index) => (
               <View
@@ -106,49 +126,77 @@ export function DatingProfileCard({ user }: DatingProfileCardProps) {
               />
             ))}
           </View>
-        )}
+        ) : null}
       </View>
 
-      <View style={styles.details}>
-        <ProfileSection title="About">
-          <Text style={styles.aboutText}>
-            {user.personalityTags.slice(0, 3).join(' · ') || 'SpeedSpark member'}
-          </Text>
-        </ProfileSection>
-
-        <ProfileSection title="Identity">
-          <TagRow
-            tags={[
-              getLabel(GENDER_OPTIONS, user.genderIdentity),
-              getLabel(ORIENTATION_OPTIONS, user.sexualOrientation),
-            ]}
+      {isCompact ? (
+        <View style={styles.compactDetails}>
+          <DetailRow
+            label="Gender"
+            value={getLabel(GENDER_OPTIONS, user.genderIdentity)}
           />
-        </ProfileSection>
-
-        {user.lookingFor.length > 0 && (
-          <ProfileSection title="Looking for">
-            <TagRow tags={user.lookingFor.map((lf) => getLabel(LOOKING_FOR_OPTIONS, lf))} />
+          <DetailRow
+            label="Orientation"
+            value={getLabel(ORIENTATION_OPTIONS, user.sexualOrientation)}
+          />
+          {user.heightInches > 0 ? (
+            <DetailRow label="Height" value={formatHeightInches(user.heightInches)} />
+          ) : null}
+          {intentionLabels.length > 0 ? (
+            <DetailTags label="Dating intentions" tags={intentionLabels} />
+          ) : null}
+          {interestedInLabels.length > 0 ? (
+            <DetailTags label="Interested in" tags={interestedInLabels} />
+          ) : null}
+          {presLabels.length > 0 ? (
+            <DetailTags label="Presentation" tags={presLabels} />
+          ) : null}
+          {user.lifestyleTags.length > 0 ? (
+            <DetailTags label="Lifestyle & values" tags={user.lifestyleTags} />
+          ) : null}
+        </View>
+      ) : (
+        <View style={styles.details}>
+          <ProfileSection title="About">
+            <Text style={styles.aboutText}>
+              {user.lifestyleTags.slice(0, 3).join(' · ') || 'SpeedSpark member'}
+            </Text>
           </ProfileSection>
-        )}
 
-        {presLabels.length > 0 && (
-          <ProfileSection title="Presentation">
-            <TagRow tags={presLabels} />
+          <ProfileSection title="Identity">
+            <TagRow
+              tags={[
+                getLabel(GENDER_OPTIONS, user.genderIdentity),
+                getLabel(ORIENTATION_OPTIONS, user.sexualOrientation),
+              ]}
+            />
           </ProfileSection>
-        )}
 
-        {user.personalityTags.length > 0 && (
-          <ProfileSection title="Vibe">
-            <TagRow tags={user.personalityTags} />
-          </ProfileSection>
-        )}
+          {intentionLabels.length > 0 && (
+            <ProfileSection title="Dating intentions">
+              <TagRow tags={intentionLabels} />
+            </ProfileSection>
+          )}
 
-        {user.lifestyleTags && user.lifestyleTags.length > 0 && (
-          <ProfileSection title="Lifestyle">
-            <TagRow tags={user.lifestyleTags} />
-          </ProfileSection>
-        )}
-      </View>
+          {interestedInLabels.length > 0 && (
+            <ProfileSection title="Interested in">
+              <TagRow tags={interestedInLabels} />
+            </ProfileSection>
+          )}
+
+          {presLabels.length > 0 && (
+            <ProfileSection title="Presentation">
+              <TagRow tags={presLabels} />
+            </ProfileSection>
+          )}
+
+          {user.lifestyleTags.length > 0 && (
+            <ProfileSection title="Lifestyle & values">
+              <TagRow tags={user.lifestyleTags} />
+            </ProfileSection>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -174,12 +222,37 @@ function TagRow({ tags }: { tags: string[] }) {
   );
 }
 
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
+    </View>
+  );
+}
+
+function DetailTags({ label, tags }: { label: string; tags: string[] }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <View style={styles.detailTagRow}>
+        {tags.map((tag) => (
+          <View key={tag} style={styles.detailTag}>
+            <Text style={styles.detailTagText}>{tag}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   card: {
     width: '100%',
-    alignItems: 'center',
+    alignItems: 'stretch',
   },
   photoFrame: {
+    width: '100%',
     borderRadius: borderRadius.lg,
     overflow: 'hidden',
     backgroundColor: colors.surface,
@@ -187,12 +260,19 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     marginBottom: spacing.md,
   },
+  photoFrameCompact: {
+    marginBottom: spacing.sm,
+  },
   photoScroll: {
     width: '100%',
   },
   photoSlide: {
     aspectRatio: 3 / 4,
     position: 'relative',
+  },
+  photoPlaceholder: {
+    width: '100%',
+    backgroundColor: colors.surfaceAlt,
   },
   photo: {
     width: '100%',
@@ -223,6 +303,9 @@ const styles = StyleSheet.create({
     fontSize: 28,
     color: colors.text,
   },
+  nameCompact: {
+    fontSize: 24,
+  },
   verifiedBadge: {
     marginTop: 4,
   },
@@ -252,6 +335,48 @@ const styles = StyleSheet.create({
   },
   dotActive: {
     backgroundColor: colors.text,
+  },
+  compactDetails: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    gap: spacing.sm,
+  },
+  detailRow: {
+    gap: spacing.xs,
+  },
+  detailLabel: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  detailValue: {
+    ...typography.body,
+    color: colors.text,
+    fontWeight: '600',
+  },
+  detailTagRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  detailTag: {
+    backgroundColor: colors.surfaceAlt,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  detailTagText: {
+    ...typography.caption,
+    color: colors.text,
+    fontWeight: '600',
   },
   details: {
     width: '100%',

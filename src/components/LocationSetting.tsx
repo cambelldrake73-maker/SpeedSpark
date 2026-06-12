@@ -35,7 +35,10 @@ export function LocationSetting({ value, onChange, error }: LocationSettingProps
   return (
     <View style={styles.wrap}>
       <Text style={[styles.label, displayError ? styles.labelError : null]}>Location</Text>
-      {value ? <Text style={styles.city}>{value.label}</Text> : null}
+      <View style={styles.citySlot}>
+        {displayError ? <Text style={styles.error}>{displayError}</Text> : null}
+        {value ? <Text style={styles.city}>{value.label}</Text> : null}
+      </View>
       <Pressable
         style={({ pressed }) => [
           styles.actionBtn,
@@ -57,11 +60,11 @@ export function LocationSetting({ value, onChange, error }: LocationSettingProps
           </>
         )}
       </Pressable>
-      {displayError ? (
-        <Text style={styles.error}>{displayError}</Text>
-      ) : (
-        <Text style={styles.hint}>City level only — set from your device GPS</Text>
-      )}
+      <View style={styles.hintSlot}>
+        {!displayError ? (
+          <Text style={styles.hint}>City level only — set from your device GPS</Text>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -79,11 +82,18 @@ const styles = StyleSheet.create({
   labelError: {
     color: colors.error,
   },
+  citySlot: {
+    minHeight: 22,
+    justifyContent: 'center',
+    marginBottom: spacing.sm,
+  },
   city: {
     ...typography.body,
     fontWeight: '600',
     color: colors.text,
-    marginBottom: spacing.sm,
+  },
+  hintSlot: {
+    minHeight: 18,
   },
   actionBtn: {
     flexDirection: 'row',
@@ -119,7 +129,6 @@ const styles = StyleSheet.create({
   error: {
     ...typography.caption,
     color: colors.error,
-    marginTop: spacing.xs,
     lineHeight: 18,
   },
 });

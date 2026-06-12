@@ -3,7 +3,6 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { BrandLogo, Button, ScreenContainer } from '../components';
-import { COPY } from '../constants/options';
 import { brand, borderRadius, colors, spacing, typography } from '../constants/theme';
 import type { WelcomeScreenProps } from '../navigation/types';
 
@@ -23,21 +22,32 @@ const PERKS = [
 
 export function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   return (
-    <ScreenContainer scroll contentStyle={styles.page} style={styles.screen}>
+    <ScreenContainer scroll={true} contentStyle={styles.page} style={styles.screen}>
       <View style={styles.heroBand}>
-        <BrandLogo size="hero" centered />
+        <BrandLogo size="hero" centered style={styles.heroLogo} />
         <Text style={styles.heroTitle}>{brand.tagline}</Text>
         <Text style={styles.heroDescription}>
-          Scheduled five-minute video dates for the queer community — verified profiles,
-          intentional matching, and mutual opt-in before you message.
+          Five-minute video dates at scheduled windows — mutual matches only.
         </Text>
-        <View style={styles.scheduleCallout}>
-          <Ionicons name="calendar-outline" size={18} color={colors.sparkOrange} />
-          <Text style={styles.scheduleText}>{COPY.scheduledWindows}</Text>
-        </View>
       </View>
 
-      <View style={styles.flowSection}>
+      <View style={styles.ctaSection}>
+        <Button
+          title="Log in"
+          onPress={() => navigation.navigate('Auth', { initialMode: 'login' })}
+          size="lg"
+        />
+        <Pressable
+          style={({ pressed }) => [styles.signupRow, pressed && styles.signupRowPressed]}
+          onPress={() => navigation.navigate('Auth', { initialMode: 'signup' })}
+          accessibilityRole="button"
+        >
+          <Text style={styles.signupText}>Don't have an account?</Text>
+          <Text style={styles.signupLink}>Create account</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.explainerSection}>
         <Text style={styles.sectionLabel}>The flow</Text>
         <View style={styles.flowCard}>
           <LinearGradient
@@ -60,9 +70,7 @@ export function WelcomeScreen({ navigation }: WelcomeScreenProps) {
             </View>
           </View>
         </View>
-      </View>
 
-      <View style={styles.featuresSection}>
         <Text style={styles.sectionLabel}>Why SpeedSpark</Text>
         <View style={styles.perkGrid}>
           {PERKS.map((perk) => (
@@ -73,49 +81,7 @@ export function WelcomeScreen({ navigation }: WelcomeScreenProps) {
           ))}
         </View>
       </View>
-
-      <View style={styles.detailsSection}>
-        <Text style={styles.sectionLabel}>The details</Text>
-        <View style={styles.howItWorks}>
-          <Step n={1} text="Set up your profile + prefs" />
-          <Step n={2} text="Join when a scheduled window opens" />
-          <Step n={3} text="Five-min call → private survey → back in queue" />
-          <Step n={4} text="Mutual match, or on to the next pairing" />
-          <Text style={styles.detailsFootnote}>
-            One pairing at a time, for as long as the window runs. Surveys capture masc/fem vibe,
-            intentions, and a private appearance balance to match you more thoughtfully — never
-            shared publicly.
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.ctaSection}>
-        <Button
-          title="Log in"
-          onPress={() => navigation.navigate('Auth', { initialMode: 'login' })}
-          size="lg"
-        />
-        <Pressable
-          style={({ pressed }) => [styles.loginRow, pressed && styles.loginRowPressed]}
-          onPress={() => navigation.navigate('Auth', { initialMode: 'signup' })}
-          accessibilityRole="button"
-        >
-          <Text style={styles.loginText}>Don't have an account?</Text>
-          <Text style={styles.loginLink}>Create account</Text>
-        </Pressable>
-      </View>
     </ScreenContainer>
-  );
-}
-
-function Step({ n, text }: { n: number; text: string }) {
-  return (
-    <View style={styles.stepRow}>
-      <View style={styles.stepBadge}>
-        <Text style={styles.stepNum}>{n}</Text>
-      </View>
-      <Text style={styles.stepText}>{text}</Text>
-    </View>
   );
 }
 
@@ -129,49 +95,59 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xxl,
   },
   heroBand: {
-    backgroundColor: colors.background,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xl,
     paddingBottom: spacing.md,
     alignItems: 'center',
     ...(Platform.OS === 'web' ? { width: '100%' } : {}),
   },
+  heroLogo: {
+    marginBottom: -spacing.sm,
+  },
   heroTitle: {
     ...typography.subtitle,
     color: colors.text,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.xs,
     textAlign: 'center',
     lineHeight: 26,
   },
   heroDescription: {
-    ...typography.body,
-    color: colors.textSecondary,
-    lineHeight: 24,
-    textAlign: 'center',
-  },
-  scheduleCallout: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-    marginTop: spacing.lg,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    width: '100%',
-  },
-  scheduleText: {
     ...typography.bodySmall,
     color: colors.textSecondary,
-    flex: 1,
-    lineHeight: 20,
+    lineHeight: 22,
+    textAlign: 'center',
   },
-  flowSection: {
+  ctaSection: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
+    paddingBottom: spacing.lg,
+    gap: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  signupRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: spacing.sm,
+  },
+  signupRowPressed: {
+    opacity: 0.7,
+  },
+  signupText: {
+    ...typography.bodySmall,
+    color: colors.textSecondary,
+  },
+  signupLink: {
+    ...typography.bodySmall,
+    fontWeight: '600',
+    color: colors.sparkOrange,
+  },
+  explainerSection: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    gap: spacing.sm,
   },
   sectionLabel: {
     ...typography.caption,
@@ -179,7 +155,8 @@ const styles = StyleSheet.create({
     color: colors.sparkOrange,
     textTransform: 'uppercase',
     letterSpacing: 1.2,
-    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
   },
   flowCard: {
     backgroundColor: colors.surface,
@@ -231,10 +208,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
   },
-  featuresSection: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
   perkGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -265,74 +238,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.text,
     flex: 1,
-  },
-  detailsSection: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  howItWorks: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  stepBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.sparkRed,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepNum: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  stepText: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-    flex: 1,
-  },
-  detailsFootnote: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginTop: spacing.sm,
-    lineHeight: 18,
-    fontStyle: 'italic',
-  },
-  ctaSection: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    gap: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    marginTop: spacing.sm,
-  },
-  loginRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: spacing.sm,
-  },
-  loginRowPressed: {
-    opacity: 0.7,
-  },
-  loginText: {
-    ...typography.bodySmall,
-    color: colors.textSecondary,
-  },
-  loginLink: {
-    ...typography.bodySmall,
-    fontWeight: '600',
-    color: colors.sparkOrange,
   },
 });

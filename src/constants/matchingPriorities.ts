@@ -2,24 +2,20 @@ import type { MatchingPriorityCategory } from '../types';
 
 export const MATCHING_PRIORITY_CATEGORIES: MatchingPriorityCategory[] = [
   'datingIntentionFit',
-  'queerRoleFit',
   'presentationFit',
-  'appearanceFit',
   'ageFit',
   'distanceFit',
-  'personalityVibeFit',
+  'appearanceFit',
   'lifestyleFit',
   'heightFit',
 ];
 
 export const DEFAULT_MATCHING_PRIORITY_ORDER: MatchingPriorityCategory[] = [
   'datingIntentionFit',
-  'queerRoleFit',
   'presentationFit',
-  'appearanceFit',
   'ageFit',
   'distanceFit',
-  'personalityVibeFit',
+  'appearanceFit',
   'lifestyleFit',
   'heightFit',
 ];
@@ -27,25 +23,21 @@ export const DEFAULT_MATCHING_PRIORITY_ORDER: MatchingPriorityCategory[] = [
 /** User-facing labels — never expose raw appearance scores. */
 export const MATCHING_PRIORITY_LABELS: Record<MatchingPriorityCategory, string> = {
   datingIntentionFit: 'Dating intentions',
-  queerRoleFit: 'Queer roles',
   presentationFit: 'Presentation',
-  appearanceFit: 'Private chemistry fit',
   ageFit: 'Age range',
   distanceFit: 'Distance',
-  personalityVibeFit: 'Personality vibe',
+  appearanceFit: 'Attractiveness',
   lifestyleFit: 'Lifestyle & values',
   heightFit: 'Height',
 };
 
 export const MATCHING_PRIORITY_HINTS: Record<MatchingPriorityCategory, string> = {
   datingIntentionFit: 'Relationship goals and what you are looking for',
-  queerRoleFit: 'Role compatibility preferences',
-  presentationFit: 'Masc/fem/presentation overlap',
-  appearanceFit: 'Uses private feedback only — never shown on anyone’s profile',
+  presentationFit: 'Presentation and vibe overlap',
   ageFit: 'How closely age matches your range',
   distanceFit: 'Geographic proximity',
-  personalityVibeFit: 'Shared personality tags',
-  lifestyleFit: 'Lifestyle tags and dealbreakers',
+  appearanceFit: 'Your private post-date attractiveness ratings — never shown on profiles',
+  lifestyleFit: 'Shared lifestyle & values tags',
   heightFit: 'Height relative to your preferred range',
 };
 

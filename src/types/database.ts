@@ -17,6 +17,7 @@ export interface Database {
           gender_identity: string;
           sexual_orientation: string;
           looking_for: string[];
+          dating_intentions: string[];
           queer_roles: string[];
           presentation_tags: string[];
           personality_tags: string[];
@@ -40,6 +41,7 @@ export interface Database {
           gender_identity?: string;
           sexual_orientation?: string;
           looking_for?: string[];
+          dating_intentions?: string[];
           queer_roles?: string[];
           presentation_tags?: string[];
           personality_tags?: string[];

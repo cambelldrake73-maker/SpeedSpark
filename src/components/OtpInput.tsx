@@ -40,6 +40,8 @@ export function OtpInput({ value, onChange, length = 6 }: OtpInputProps) {
         keyboardType="number-pad"
         maxLength={length}
         style={styles.hiddenInput}
+        showSoftInputOnFocus
+        caretHidden
         autoFocus={Platform.OS !== 'web'}
         {...(Platform.OS === 'ios' ? { textContentType: 'oneTimeCode' as const } : {})}
       />
@@ -70,9 +72,12 @@ const styles = StyleSheet.create({
         }
       : {
           position: 'absolute',
-          opacity: 0,
-          height: 1,
-          width: 1,
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 56,
+          opacity: 0.02,
+          color: 'transparent',
         }),
   },
   cells: {

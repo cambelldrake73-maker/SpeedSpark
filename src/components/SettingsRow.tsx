@@ -11,6 +11,7 @@ interface SettingsRowProps {
   onPress?: () => void;
   destructive?: boolean;
   showChevron?: boolean;
+  compact?: boolean;
   last?: boolean;
 }
 
@@ -64,6 +65,7 @@ export function SettingsRow({
   onPress,
   destructive = false,
   showChevron = true,
+  compact = false,
   last = false,
 }: SettingsRowProps) {
   const iconColor = destructive ? colors.error : colors.sparkOrange;
@@ -75,13 +77,20 @@ export function SettingsRow({
       disabled={!onPress}
       style={({ pressed }) => [
         styles.row,
+        compact && styles.rowCompact,
         last && styles.rowLast,
         pressed && onPress && styles.rowPressed,
         !onPress && styles.rowStatic,
       ]}
     >
-      <View style={[styles.iconWrap, destructive && styles.iconWrapDestructive]}>
-        <Ionicons name={icon} size={20} color={iconColor} />
+      <View
+        style={[
+          styles.iconWrap,
+          compact && styles.iconWrapCompact,
+          destructive && styles.iconWrapDestructive,
+        ]}
+      >
+        <Ionicons name={icon} size={compact ? 18 : 20} color={iconColor} />
       </View>
       <View style={styles.copy}>
         <Text style={[styles.title, { color: titleColor }]}>{title}</Text>
@@ -134,6 +143,11 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null),
   },
+  rowCompact: {
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm + 2,
+  },
   rowLast: {
     borderBottomWidth: 0,
   },
@@ -150,6 +164,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentLight,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  iconWrapCompact: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
   },
   iconWrapDestructive: {
     backgroundColor: 'rgba(239, 68, 68, 0.12)',

@@ -1,14 +1,36 @@
 import { Alert, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { promptOpenAppSettings } from './openAppSettings';
 
 export type PhotoSource = 'library' | 'camera';
 
 const pickerOptions: ImagePicker.ImagePickerOptions = {
   mediaTypes: ['images'],
-  allowsEditing: true,
-  aspect: [3, 4],
-  quality: 0.85,
+  allowsEditing: false,
+  quality: 0.9,
+  exif: false,
+  ...(Platform.OS === 'ios'
+    ? {
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      }
+    : {}),
 };
+
+function promptPhotoPermissionDenied(source: PhotoSource): void {
+  if (source === 'library') {
+    promptOpenAppSettings(
+      'Photos access needed',
+      'Allow photo library access in Settings to upload a picture.',
+    );
+    return;
+  }
+
+  promptOpenAppSettings(
+    'Camera access needed',
+    'Allow camera access in Settings to take a photo.',
+  );
+}
 
 export async function pickProfilePhotoFromSource(source: PhotoSource): Promise<string | null> {
   try {
@@ -16,10 +38,7 @@ export async function pickProfilePhotoFromSource(source: PhotoSource): Promise<s
       if (Platform.OS !== 'web') {
         const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (!permission.granted) {
-          Alert.alert(
-            'Photos access needed',
-            'Allow photo library access in settings to upload a picture.',
-          );
+          promptPhotoPermissionDenied('library');
           return null;
         }
       }
@@ -29,13 +48,12 @@ export async function pickProfilePhotoFromSource(source: PhotoSource): Promise<s
       return result.assets[0].uri;
     }
 
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        'Camera access needed',
-        'Allow camera access in settings to take a photo.',
-      );
-      return null;
+    if (Platform.OS !== 'web') {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        promptPhotoPermissionDenied('camera');
+        return null;
+      }
     }
 
     const result = await ImagePicker.launchCameraAsync(pickerOptions);

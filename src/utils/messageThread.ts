@@ -1,4 +1,4 @@
-import type { Message } from '../types';
+import type { Match, Message } from '../types';
 
 export type MessageTurn = 'yours' | 'theirs';
 
@@ -6,6 +6,23 @@ export interface MessageThreadMeta {
   turn: MessageTurn | null;
   hasUnread: boolean;
   lastMessage?: Message;
+}
+
+export const EMPTY_MATCH_PREVIEW = 'New match';
+
+export function getMatchPreviewText(match: Match, messages: Message[]): string {
+  const last = messages[messages.length - 1];
+  if (last?.text) {
+    return last.text;
+  }
+  if (match.lastMessage) {
+    return match.lastMessage;
+  }
+  return EMPTY_MATCH_PREVIEW;
+}
+
+export function isEmptyMatchThread(messages: Message[], match: Match): boolean {
+  return messages.length === 0 && !match.lastMessage;
 }
 
 export function getMessageThreadMeta(

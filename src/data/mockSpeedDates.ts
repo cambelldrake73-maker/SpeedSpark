@@ -3,8 +3,8 @@ import type { SpeedDateWindow } from '../types';
 export const MOCK_SPEED_DATE_WINDOWS: SpeedDateWindow[] = [
   {
     id: 'window-1',
-    label: 'Weeknight Queer Mix',
-    description: 'Relaxed weekday window for dates, friends, and new connections.',
+    label: 'Weeknight Mix',
+    description: '',
     startTime: '2026-06-02T19:00:00',
     endTime: '2026-06-02T21:00:00',
     timezone: 'America/New_York',
