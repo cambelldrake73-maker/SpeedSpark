@@ -85,17 +85,29 @@ A pair `(A, B)` is **ineligible** if **any** gate fails. Blockers are logged int
 
 ## 4. Soft scoring categories
 
-Each category returns **0–100**. All seven rank keys participate in directional scoring:
+Each category returns **0–100**. All seven rank keys participate in directional scoring.
+
+### Scoring interpretation
+
+| Score | Meaning |
+|-------|---------|
+| **100** | Strong positive signal — confirmed match on this dimension |
+| **50** | Unknown / neutral / insufficient data — **not** treated as a mismatch |
+| **0** | Strong negative signal — confirmed mismatch when both sides have meaningful data |
+
+Constant: `NEUTRAL_MATCH_SCORE = 50` in `src/constants/matchingScoring.ts`.
+
+Missing or unset values must **never** produce 0. Only confirmed mismatches (e.g. both users listed intentions with zero overlap, partner age outside a set range) decay toward 0.
 
 | Key | Label | Formula (summary) |
 |-----|-------|-------------------|
-| `datingIntentionFit` | Dating intentions | Overlap ratio of `datingIntentions` arrays × 100; neutral 50 if either empty |
-| `presentationFit` | Presentation | Overlap of viewer `preferredPresentationTags` vs partner `presentationTags`; neutral 50–70 if viewer prefs empty |
-| `ageFit` | Age range | 100 if partner age in range; linear decay outside range |
-| `distanceFit` | Distance | Higher when closer within max distance; decays beyond max (hard gate already rejected those) |
-| `appearanceFit` | Attractiveness | Prior `date_feedback` rating × 10 (0–100); default **50** if unrated |
-| `lifestyleFit` | Lifestyle & values | Overlap ratio of `lifestyleTags` × 100 |
-| `heightFit` | Height | 100 if partner height in range; linear decay outside range |
+| `datingIntentionFit` | Dating intentions | Overlap × 100 when both have intentions; **50** if either side empty |
+| `presentationFit` | Presentation | Overlap when viewer prefs and partner tags both set; **50** if viewer prefs empty or partner tags empty |
+| `ageFit` | Age range | 100 in range; decay outside range; **50** if age prefs or partner age unknown |
+| `distanceFit` | Distance | Higher when closer within max; **50** if lat/lng missing on either side |
+| `appearanceFit` | Attractiveness | Prior feedback × 10; **50** if no rating history |
+| `lifestyleFit` | Lifestyle & values | Overlap × 100 when both have tags; **50** if either side empty |
+| `heightFit` | Height | 100 in range; decay outside range; **50** if height prefs or partner height unknown |
 
 `appearanceFit` is **internal only** — never included in user-visible `reasons` strings.
 
@@ -222,7 +234,7 @@ Casey previously rated **Pat** attractiveness **9/10** → `appearanceFit` = 90 
 |---------|------|
 | Gates + scoring | `src/services/matchingService.ts` |
 | Priority weights | `src/constants/matchingPriorities.ts` |
-| Appearance scores | `src/services/matchingAppearance.ts` |
+| Appearance scores | `src/services/matchingAppearance.ts`, `src/constants/matchingScoring.ts` |
 | Greedy pairing | `src/services/pairingEngine.ts` |
 | Server bundle | `src/services/matchingDataServer.ts` + RPC `get_window_matching_context` |
 | Dev tests | `src/services/dev/matchingFrameworkTests.ts` |

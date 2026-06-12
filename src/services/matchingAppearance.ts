@@ -1,7 +1,9 @@
+import { NEUTRAL_MATCH_SCORE } from '../constants/matchingScoring';
 import { logBackendInfo } from './backendLogger';
 import { isDbAvailable, resolveDbClient } from './dbClient';
 
-const NEUTRAL_APPEARANCE_SCORE = 50;
+/** @deprecated Use NEUTRAL_MATCH_SCORE from constants/matchingScoring */
+export const NEUTRAL_APPEARANCE_SCORE = NEUTRAL_MATCH_SCORE;
 
 /**
  * Private appearance fit from prior date_feedback only.
@@ -13,7 +15,7 @@ export async function fetchAppearanceFitScores(
 ): Promise<Map<string, number>> {
   const scores = new Map<string, number>();
   for (const partnerId of partnerIds) {
-    scores.set(partnerId, NEUTRAL_APPEARANCE_SCORE);
+    scores.set(partnerId, NEUTRAL_MATCH_SCORE);
   }
 
   if (!isDbAvailable() || partnerIds.length === 0) {
@@ -45,4 +47,4 @@ export async function fetchAppearanceFitScores(
   return scores;
 }
 
-export { NEUTRAL_APPEARANCE_SCORE };
+export { NEUTRAL_MATCH_SCORE };

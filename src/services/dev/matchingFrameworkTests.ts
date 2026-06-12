@@ -3,7 +3,8 @@
  * Run via Metro: await SpeedSparkMatchingDev.runMatchingFrameworkTests()
  */
 import { DEFAULT_MATCHING_PRIORITY_ORDER } from '../../constants/matchingPriorities';
-import type { DatingPreferences, GenderIdentity, UserProfile } from '../../types';
+import { NEUTRAL_MATCH_SCORE } from '../../constants/matchingScoring';
+import type { DatingPreferences, GenderIdentity, MatchingPriorityCategory, UserProfile } from '../../types';
 import {
   collectHardBlockers,
   evaluateCompatibility,
@@ -328,6 +329,138 @@ export function runMatchingFrameworkTests(): MatchingFrameworkTestReport {
     assert(blockers.some((b) => b.includes('Account B not active')), 'account status gate', failures);
     if (blockers.some((b) => b.includes('Account B not active'))) {
       pass('inactive account blocked');
+    }
+  }
+
+  // 7. Missing data → neutral (50), not penalized as mismatch
+  {
+    const neutralCategories: MatchingPriorityCategory[] = [
+      'datingIntentionFit',
+      'presentationFit',
+      'lifestyleFit',
+      'appearanceFit',
+      'ageFit',
+      'heightFit',
+    ];
+
+    const sparseViewer = baseProfile('sparse-viewer', 'woman', {
+      datingIntentions: [],
+      presentationTags: [],
+      lifestyleTags: [],
+    });
+    const sparsePartner = baseProfile('sparse-partner', 'woman', {
+      datingIntentions: [],
+      presentationTags: [],
+      lifestyleTags: [],
+    });
+    const minimalPrefs: Partial<DatingPreferences> = {
+      preferredLookingFor: ['woman'],
+      matchingPriorityOrder: [...DEFAULT_MATCHING_PRIORITY_ORDER],
+    };
+
+    const sparseFit = scoreDirectionalFit({
+      viewer: sparseViewer,
+      viewerPrefs: minimalPrefs,
+      partner: sparsePartner,
+    });
+
+    for (const category of neutralCategories) {
+      assert(
+        sparseFit.categoryScores[category] === NEUTRAL_MATCH_SCORE,
+        `7a. ${category} should be neutral for sparse profiles`,
+        failures,
+      );
+    }
+
+    const noAppearance = scoreDirectionalFit({
+      viewer: sparseViewer,
+      viewerPrefs: minimalPrefs,
+      partner: sparsePartner,
+    });
+    assert(
+      noAppearance.categoryScores.appearanceFit === NEUTRAL_MATCH_SCORE,
+      '7b. no appearance history → neutral',
+      failures,
+    );
+
+    const noPresentationPrefs = basePrefs(['woman']);
+    noPresentationPrefs.preferredPresentationTags = [];
+    const presFit = scoreDirectionalFit({
+      viewer: baseProfile('pres-viewer', 'woman'),
+      viewerPrefs: noPresentationPrefs,
+      partner: baseProfile('pres-partner', 'woman', { presentationTags: ['fem'] }),
+    });
+    assert(
+      presFit.categoryScores.presentationFit === NEUTRAL_MATCH_SCORE,
+      '7c. empty preferredPresentationTags → neutral (not 0)',
+      failures,
+    );
+
+    const noLifestyle = scoreDirectionalFit({
+      viewer: baseProfile('life-a', 'woman', { lifestyleTags: [] }),
+      viewerPrefs: basePrefs(['woman']),
+      partner: baseProfile('life-b', 'woman', { lifestyleTags: [] }),
+    });
+    assert(
+      noLifestyle.categoryScores.lifestyleFit === NEUTRAL_MATCH_SCORE,
+      '7d. no lifestyle tags → neutral',
+      failures,
+    );
+
+    const noLocation = scoreDirectionalFit({
+      viewer: baseProfile('dist-a', 'woman', {
+        locationLatitude: undefined,
+        locationLongitude: undefined,
+      }),
+      viewerPrefs: basePrefs(['woman']),
+      partner: baseProfile('dist-b', 'woman', {
+        locationLatitude: undefined,
+        locationLongitude: undefined,
+      }),
+    });
+    assert(
+      noLocation.categoryScores.distanceFit === NEUTRAL_MATCH_SCORE,
+      '7e. missing location → neutral distance',
+      failures,
+    );
+
+    const sparseMutual = evaluateCompatibility({
+      userA: { profile: sparseViewer, preferences: minimalPrefs },
+      userB: { profile: sparsePartner, preferences: minimalPrefs },
+      blockedA: emptyBlocked,
+      blockedB: emptyBlocked,
+    });
+    assert(sparseMutual.compatible, '7f. sparse users pass hard gates', failures);
+    assert(
+      sparseMutual.score >= NEUTRAL_MATCH_SCORE - 5,
+      '7g. sparse users not heavily penalized in mutual score',
+      failures,
+    );
+    assert(
+      !Object.values(sparseFit.categoryScores).includes(0),
+      '7h. sparse profiles should not produce zero category scores',
+      failures,
+    );
+
+    const confirmedMismatch = scoreDirectionalFit({
+      viewer: baseProfile('intent-a', 'woman', { datingIntentions: ['relationship'] }),
+      viewerPrefs: basePrefs(['woman']),
+      partner: baseProfile('intent-b', 'woman', { datingIntentions: ['friends'] }),
+    });
+    assert(
+      confirmedMismatch.categoryScores.datingIntentionFit === 0,
+      '7i. confirmed intention mismatch may still score 0',
+      failures,
+    );
+
+    const allNeutralOk =
+      neutralCategories.every((c) => sparseFit.categoryScores[c] === NEUTRAL_MATCH_SCORE) &&
+      presFit.categoryScores.presentationFit === NEUTRAL_MATCH_SCORE &&
+      noLifestyle.categoryScores.lifestyleFit === NEUTRAL_MATCH_SCORE &&
+      sparseMutual.score >= NEUTRAL_MATCH_SCORE - 5;
+
+    if (allNeutralOk) {
+      pass('missing data scores neutral (50), not mismatch (0)');
     }
   }
 

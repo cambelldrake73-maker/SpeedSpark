@@ -3,12 +3,14 @@ import {
   normalizeMatchingPriorityOrder,
   priorityWeights,
 } from '../constants/matchingPriorities';
+import { NEUTRAL_MATCH_SCORE } from '../constants/matchingScoring';
 import type { DatingPreferences, MatchingPriorityCategory, UserProfile } from '../types';
 import type { AccountStatus } from '../types/safety';
 import type { CompatibilityResult, PairingCandidatePair } from '../types/matchingBackend';
 import { distanceMiles } from '../utils/matchingGeometry';
-import { NEUTRAL_APPEARANCE_SCORE } from './matchingAppearance';
 import { logBackendInfo, logMatchDecision } from './backendLogger';
+
+export { NEUTRAL_MATCH_SCORE };
 
 export interface MatchingContext {
   recentPairKeys?: Set<string>;
@@ -31,6 +33,17 @@ function overlapRatio(a: string[] | undefined, b: string[] | undefined): number 
   const setB = new Set(b);
   const overlap = a.filter((v) => setB.has(v)).length;
   return overlap / Math.max(a.length, b.length);
+}
+
+/**
+ * Overlap-based fit when both sides have data.
+ * Missing either side → neutral. Both set, zero overlap → 0 (confirmed mismatch).
+ */
+function scoreTagOverlapFit(a: string[] | undefined, b: string[] | undefined): number {
+  if (!a?.length || !b?.length) {
+    return NEUTRAL_MATCH_SCORE;
+  }
+  return Math.round(overlapRatio(a, b) * 100);
 }
 
 function pairKey(userAId: string, userBId: string): string {
@@ -72,9 +85,13 @@ function exceedsMaxDistance(
 }
 
 function scoreAgeFit(viewerPrefs: Partial<DatingPreferences>, partner: UserProfile): number {
-  const min = viewerPrefs.ageRangeMin ?? 18;
-  const max = viewerPrefs.ageRangeMax ?? 99;
+  const min = viewerPrefs.ageRangeMin;
+  const max = viewerPrefs.ageRangeMax;
   const age = partner.age;
+
+  if (min == null || max == null || !age || age <= 0) {
+    return NEUTRAL_MATCH_SCORE;
+  }
 
   if (age >= min && age <= max) {
     return 100;
@@ -85,13 +102,13 @@ function scoreAgeFit(viewerPrefs: Partial<DatingPreferences>, partner: UserProfi
 }
 
 function scoreHeightFit(viewerPrefs: Partial<DatingPreferences>, partner: UserProfile): number {
+  const min = viewerPrefs.heightMinInches;
+  const max = viewerPrefs.heightMaxInches;
   const height = partner.heightInches ?? 0;
-  if (height <= 0) {
-    return 50;
-  }
 
-  const min = viewerPrefs.heightMinInches ?? 0;
-  const max = viewerPrefs.heightMaxInches ?? 120;
+  if (min == null || max == null || height <= 0) {
+    return NEUTRAL_MATCH_SCORE;
+  }
 
   if (height >= min && height <= max) {
     return 100;
@@ -113,7 +130,7 @@ function scoreDistanceFit(
   const lngB = partner.locationLongitude;
 
   if (latA == null || lngA == null || latB == null || lngB == null) {
-    return 50;
+    return NEUTRAL_MATCH_SCORE;
   }
 
   const miles = distanceMiles(latA, lngA, latB, lngB);
@@ -133,10 +150,10 @@ function scoreDatingIntentionFit(
   const partnerIntentions = partner.datingIntentions ?? [];
 
   if (viewerIntentions.length === 0 || partnerIntentions.length === 0) {
-    return 50;
+    return NEUTRAL_MATCH_SCORE;
   }
 
-  return Math.round(overlapRatio(viewerIntentions, partnerIntentions) * 100);
+  return scoreTagOverlapFit(viewerIntentions, partnerIntentions);
 }
 
 function scorePresentationFit(
@@ -145,9 +162,9 @@ function scorePresentationFit(
 ): number {
   const preferred = viewerPrefs.preferredPresentationTags ?? [];
   if (preferred.length === 0) {
-    return partner.presentationTags.length > 0 ? 70 : 50;
+    return NEUTRAL_MATCH_SCORE;
   }
-  return Math.round(overlapRatio(preferred, partner.presentationTags) * 100);
+  return scoreTagOverlapFit(preferred, partner.presentationTags);
 }
 
 function scoreAppearanceFit(
@@ -157,13 +174,13 @@ function scoreAppearanceFit(
 ): number {
   const viewerScores = context?.appearanceScoresByViewer?.get(viewerId);
   if (!viewerScores) {
-    return NEUTRAL_APPEARANCE_SCORE;
+    return NEUTRAL_MATCH_SCORE;
   }
-  return viewerScores.get(partnerId) ?? NEUTRAL_APPEARANCE_SCORE;
+  return viewerScores.get(partnerId) ?? NEUTRAL_MATCH_SCORE;
 }
 
 function scoreLifestyleFit(viewer: UserProfile, partner: UserProfile): number {
-  return Math.round(overlapRatio(viewer.lifestyleTags, partner.lifestyleTags) * 100);
+  return scoreTagOverlapFit(viewer.lifestyleTags, partner.lifestyleTags);
 }
 
 function scoreCategory(
@@ -189,7 +206,7 @@ function scoreCategory(
     case 'lifestyleFit':
       return scoreLifestyleFit(viewer, partner);
     default:
-      return 50;
+      return NEUTRAL_MATCH_SCORE;
   }
 }
 
