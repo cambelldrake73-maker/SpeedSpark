@@ -44,6 +44,10 @@ export async function loadMatchCandidates(windowId: string): Promise<MatchCandid
       joinedAt: entry.joinedAt,
       profile,
       preferences: preferences ?? {},
+      availability: 'waiting',
+      speedDateId: null,
+      secondsUntilAvailable: 0,
+      currentPartnerId: null,
     });
   }
 

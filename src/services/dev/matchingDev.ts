@@ -142,8 +142,11 @@ export async function compareDevMatchScores(userAId: string, userBId: string) {
 }
 
 export { runMatchingFrameworkTests } from './matchingFrameworkTests';
+export { runWaitPolicyTests, printWaitPolicyTable } from './waitPolicyTests';
 
 if (__DEV__) {
+  const reservationDev = require('./reservationDev') as typeof import('./reservationDev');
+
   (globalThis as Record<string, unknown>).SpeedSparkMatchingDev = {
     seedDevLiveWindow,
     simulateQueuePopulation,
@@ -151,5 +154,20 @@ if (__DEV__) {
     printDevQueueReport,
     compareDevMatchScores,
     runMatchingFrameworkTests,
+    seedReservationTestWindow: reservationDev.seedReservationTestWindow,
+    runDevReservationPlan: reservationDev.runDevReservationPlan,
+    planReservationsWithAvailableSoon: reservationDev.planReservationsWithAvailableSoon,
+    seedActiveDatesEndingSoon: reservationDev.seedActiveDatesEndingSoon,
+    completeActiveDateForTesting: reservationDev.completeActiveDateForTesting,
+    commitReservationAfterAvailability: reservationDev.commitReservationAfterAvailability,
+    createTestReservation: reservationDev.createTestReservation,
+    commitTestReservation: reservationDev.commitTestReservation,
+    expireStaleReservations: reservationDev.expireStaleReservations,
+    printReservationReport: reservationDev.printReservationReport,
+    printOrchestrationReport: reservationDev.printOrchestrationReport,
+    printReservationMetrics: reservationDev.printReservationMetrics,
+    testWaitPolicy: runWaitPolicyTests,
+    runWaitPolicyTests,
+    printWaitPolicyTable,
   };
 }

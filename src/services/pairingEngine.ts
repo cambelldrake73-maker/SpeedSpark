@@ -4,11 +4,16 @@ import {
   blockedIdsForUser,
   cleanupStaleQueueEntries,
   loadWindowMatchingBundle,
+  waitingCandidatesOnly,
 } from './matchingDataServer';
 import { evaluateCompatibilityMatrix } from './matchingService';
 import { isServerPairingExecution } from './pairingExecutionContext';
 import { applyQueuePair } from './speedDatesPairing';
 import { getQueueCounts } from './queueService';
+import {
+  buildWaitSecondsMap,
+  filterPairsByWaitPolicy,
+} from './waitPolicy';
 
 const MAX_EVALUATED_PAIRS_LOGGED = 25;
 
@@ -25,7 +30,9 @@ export async function runPairingForWindow(windowId: string): Promise<PairingOutc
 
   await cleanupStaleQueueEntries(windowId);
 
-  const { candidates, matchingContext, blockedByUser } = await loadWindowMatchingBundle(windowId);
+  const { candidates: allCandidates, matchingContext, blockedByUser } =
+    await loadWindowMatchingBundle(windowId);
+  const candidates = waitingCandidatesOnly(allCandidates);
   const candidateIds = candidates.map((c) => c.userId);
 
   if (candidates.length < 2) {
@@ -54,11 +61,20 @@ export async function runPairingForWindow(windowId: string): Promise<PairingOutc
   }));
 
   const rankedPairs = evaluateCompatibilityMatrix(withBlocks, matchingContext);
+  const waitSecondsByUser = buildWaitSecondsMap(candidates);
+  const waitFiltered = filterPairsByWaitPolicy(rankedPairs, waitSecondsByUser, candidates.length);
+
+  logBackendInfo('pairing.waitPolicy.applied', {
+    windowId,
+    ...waitFiltered.metrics,
+    compatibleBeforeFilter: rankedPairs.length,
+    compatibleAfterFilter: waitFiltered.accepted.length,
+  });
 
   logBackendInfo('pairing.scores.ranked', {
     windowId,
-    compatiblePairs: rankedPairs.length,
-    topScores: rankedPairs.slice(0, 10).map((pair) => ({
+    compatiblePairs: waitFiltered.accepted.length,
+    topScores: waitFiltered.accepted.slice(0, 10).map((pair) => ({
       userAId: pair.userAId,
       userBId: pair.userBId,
       score: pair.score,
@@ -67,12 +83,15 @@ export async function runPairingForWindow(windowId: string): Promise<PairingOutc
 
   const used = new Set<string>();
   const speedDateIds: string[] = [];
-  const skippedPairs: PairingOutcome['skippedPairs'] = [];
+  const skippedPairs: PairingOutcome['skippedPairs'] = waitFiltered.rejected.map((rejected) => ({
+    userAId: rejected.userAId,
+    userBId: rejected.userBId,
+    reason: rejected.reason,
+    score: rejected.score,
+  }));
   const evaluatedPairs: PairingOutcome['evaluatedPairs'] = [];
 
   for (const pair of rankedPairs) {
-    const alreadyUsed = used.has(pair.userAId) || used.has(pair.userBId);
-
     if (evaluatedPairs.length < MAX_EVALUATED_PAIRS_LOGGED) {
       evaluatedPairs.push({
         userAId: pair.userAId,
@@ -82,7 +101,10 @@ export async function runPairingForWindow(windowId: string): Promise<PairingOutc
         applied: false,
       });
     }
+  }
 
+  for (const pair of waitFiltered.accepted) {
+    const alreadyUsed = used.has(pair.userAId) || used.has(pair.userBId);
     if (alreadyUsed) {
       continue;
     }
@@ -133,6 +155,7 @@ export async function runPairingForWindow(windowId: string): Promise<PairingOutc
     unmatchedUserIds,
     skippedPairs,
     evaluatedPairs,
+    waitPolicy: waitFiltered.metrics,
   };
 
   const counts = await getQueueCounts(windowId);

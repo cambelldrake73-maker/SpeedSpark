@@ -27,7 +27,7 @@ export function WelcomeScreen({ navigation }: WelcomeScreenProps) {
         <BrandLogo size="hero" centered style={styles.heroLogo} />
         <Text style={styles.heroTitle}>{brand.tagline}</Text>
         <Text style={styles.heroDescription}>
-          Five-minute video dates at scheduled windows — mutual matches only.
+          Five-minute video dates at scheduled windows.
         </Text>
       </View>
 

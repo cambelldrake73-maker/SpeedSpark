@@ -14,12 +14,59 @@ export interface InvokePairingResponse {
     skipped: number;
     skippedLock?: boolean;
   }>;
+  planRuns?: Array<{
+    windowId: string;
+    candidatesConsidered: number;
+    reservationsCreated: number;
+    immediateCommits?: number;
+    waitingCandidates?: number;
+    availableSoonCandidates?: number;
+    reservationIds: string[];
+    unmatched: number;
+    skipped: number;
+    skippedLock?: boolean;
+  }>;
+  commitResult?: {
+    ok: boolean;
+    reservationId?: string;
+    speedDateId?: string;
+    windowId?: string;
+    userAId?: string;
+    userBId?: string;
+    error?: string;
+    reasonCode?: string;
+    userId?: string;
+  };
+  seedSpeedDateResult?: {
+    ok: boolean;
+    speedDateId?: string;
+    error?: string;
+  };
+  endSpeedDateResult?: {
+    ok: boolean;
+    speedDateId?: string;
+    windowId?: string;
+    userAId?: string;
+    userBId?: string;
+    error?: string;
+  };
+  orchestrationReport?: Record<string, unknown>;
+  reservationMetrics?: Record<string, unknown>;
+  expiredCount?: number;
+  reservations?: Array<Record<string, unknown>>;
   error?: string;
 }
 
 /** Invokes the server-side pairing Edge Function (trusted matching context). */
 export async function invokeServerPairing(options?: {
   windowId?: string;
+  mode?: 'pair' | 'plan';
+  action?: 'commit' | 'expire' | 'report' | 'seedActiveDate' | 'endSpeedDate' | 'orchestrationReport' | 'reservationMetrics';
+  reservationId?: string;
+  speedDateId?: string;
+  userAId?: string;
+  userBId?: string;
+  secondsRemaining?: number;
 }): Promise<InvokePairingResponse> {
   const headers: Record<string, string> = {};
   if (PAIRING_INVOKE_SECRET) {
@@ -28,6 +75,8 @@ export async function invokeServerPairing(options?: {
 
   logBackendInfo('pairing.remote.invoke', {
     windowId: options?.windowId ?? 'all-live',
+    mode: options?.mode ?? 'pair',
+    action: options?.action,
     hasSecret: Boolean(PAIRING_INVOKE_SECRET),
   });
 

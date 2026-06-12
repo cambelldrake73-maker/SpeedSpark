@@ -4,13 +4,19 @@ import { logBackendInfo } from './backendLogger';
 import { isDbAvailable, resolveDbClient } from './dbClient';
 import { runPairingForWindow } from './pairingEngine';
 import { runInServerPairingContext } from './pairingExecutionContext';
+import { planPairsForWindow } from './queueOrchestrator';
 import {
   pairingWorkerId,
   releasePairingLock,
   tryAcquirePairingLock,
   type PairingTriggerSource,
 } from './pairingLocks';
-import { persistPairingRun, type PairingRunSummary } from './pairingRunLog';
+import {
+  persistPairingRun,
+  persistReservationPlanRun,
+  type PairingRunSummary,
+  type ReservationPlanRunSummary,
+} from './pairingRunLog';
 import { getQueueCounts } from './queueService';
 
 interface LiveWindowRow {
@@ -23,6 +29,8 @@ export interface PairingCoordinatorResult {
   windowsScanned: number;
   runs: PairingRunSummary[];
 }
+
+export type { ReservationPlanRunSummary } from './pairingRunLog';
 
 async function fetchLiveWindowIds(): Promise<LiveWindowRow[]> {
   if (!isDbAvailable()) {
@@ -133,6 +141,85 @@ export async function runPairingForWindowWithCoordinator(
   triggerSource: PairingTriggerSource,
 ): Promise<PairingRunSummary> {
   return runPairingForWindowGuarded(windowId, triggerSource);
+}
+
+async function runPlanPairsForWindowGuarded(
+  windowId: string,
+  triggerSource: PairingTriggerSource,
+): Promise<ReservationPlanRunSummary> {
+  return runInServerPairingContext(async () => {
+    const workerId = pairingWorkerId(triggerSource);
+    const counts = await getQueueCounts(windowId);
+
+    logBackendInfo('reservation.coordinator.start', {
+      windowId,
+      triggerSource,
+      workerId,
+      waiting: counts.waiting,
+    });
+
+    const acquired = await tryAcquirePairingLock(windowId, workerId);
+    if (!acquired) {
+      logBackendInfo('reservation.coordinator.skippedLocked', { windowId, workerId });
+      return {
+        windowId,
+        triggerSource,
+        candidatesConsidered: counts.waiting,
+        skippedLock: true,
+        outcome: {
+          windowId,
+          reservationsCreated: 0,
+          reservationIds: [],
+          immediateCommits: 0,
+          waitingCandidates: counts.waiting,
+          availableSoonCandidates: 0,
+          pendingReservationCount: 0,
+          evaluatedPairsCount: 0,
+          availableSoonSnapshots: [],
+          commitFailures: [],
+          unmatchedUserIds: [],
+          skippedPairs: [],
+          evaluatedPairs: [],
+        },
+      };
+    }
+
+    try {
+      const waitingBeforeRun = counts.waiting;
+      const outcome = await planPairsForWindow(windowId);
+
+      logBackendInfo('reservation.coordinator.complete', {
+        windowId,
+        reservationsCreated: outcome.reservationsCreated,
+        immediateCommits: outcome.immediateCommits,
+        reservationIds: outcome.reservationIds,
+        waitingCandidates: outcome.waitingCandidates,
+        availableSoonCandidates: outcome.availableSoonCandidates,
+        unmatched: outcome.unmatchedUserIds.length,
+        skipped: outcome.skippedPairs.length,
+      });
+
+      const summary: ReservationPlanRunSummary = {
+        windowId,
+        triggerSource,
+        candidatesConsidered: waitingBeforeRun,
+        outcome,
+      };
+
+      await persistReservationPlanRun(summary);
+      return summary;
+    } finally {
+      await releasePairingLock(windowId, workerId);
+    }
+  });
+}
+
+/** Plan reservations for a single window (dev / targeted orchestration runs). */
+export async function runPlanPairsForWindowWithCoordinator(
+  windowId: string,
+  triggerSource: PairingTriggerSource,
+): Promise<ReservationPlanRunSummary> {
+  return runPlanPairsForWindowGuarded(windowId, triggerSource);
 }
 
 /** Runs greedy pairing for live windows. Requires service-role client override. */

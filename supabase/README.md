@@ -39,9 +39,13 @@ In the Supabase Dashboard, open **SQL Editor** and run **in order**:
 9. `supabase/migrations/009_account_safety.sql`
 10. `supabase/migrations/010_speed_date_calls.sql`
 11. `supabase/migrations/011_contact_verification.sql`
+12. `supabase/migrations/012_dating_intentions.sql`
+13. `supabase/migrations/013_pair_reservations.sql` — Queue Orchestration v2 Phase 1 (pre-match reservations)
+14. `supabase/migrations/014_available_soon_pool.sql` — Phase 2 (Available Soon candidate pool)
 
 See [docs/MODERATION.md](../docs/MODERATION.md) for report review and account status workflows.  
 See [docs/LIVEKIT_SETUP.md](../docs/LIVEKIT_SETUP.md) for voice call setup (LiveKit + Edge Functions).  
+See [docs/QUEUE_ORCHESTRATION_V2.md](../docs/QUEUE_ORCHESTRATION_V2.md) for reservation lifecycle (Phase 1).  
 See [docs/CONTACT_VERIFICATION_SETUP.md](../docs/CONTACT_VERIFICATION_SETUP.md) for SMS / voice / email OTP setup (Twilio Verify + Resend).
 
 ## 4. Enable Realtime (queue + speed dates + feedback + messages)
@@ -166,6 +170,99 @@ await globalThis.SpeedSparkMatchingDev.printDevQueueReport('WINDOW_ID')
 
 6. Confirm in **Table Editor** → `queue_entries`, `speed_dates`, `pairing_run_logs`.
 
+### Testing reservations (Phase 1 — plan early, commit late)
+
+Requires migration **013** and redeployed `pair-live-windows` Edge Function.
+
+1. Seed a window and queue two users (same as above, or use reservation-specific seed):
+
+```js
+const windowId = await SpeedSparkMatchingDev.seedReservationTestWindow()
+await SpeedSparkMatchingDev.simulateQueuePopulation(windowId, ['USER_A_UUID', 'USER_B_UUID'])
+```
+
+2. **Plan** — create pending reservations (no `speed_dates` row yet):
+
+```js
+await SpeedSparkMatchingDev.runDevReservationPlan(windowId)
+// or: const reservationId = await SpeedSparkMatchingDev.createTestReservation(windowId)
+```
+
+3. Inspect holds:
+
+```js
+await SpeedSparkMatchingDev.printReservationReport(windowId)
+```
+
+4. **Commit** — re-validates gates, creates `speed_dates`, sets queue `paired`:
+
+```js
+await SpeedSparkMatchingDev.commitTestReservation('RESERVATION_UUID')
+```
+
+5. **Expire** stale pending reservations (TTL default 90s):
+
+```js
+await SpeedSparkMatchingDev.expireStaleReservations()
+```
+
+6. Confirm in **Table Editor** → `pair_reservations`, then `speed_dates` after commit.
+
+**Immediate pairing still works:** `runDevPairing(windowId)` uses `apply_queue_pair` directly (unchanged v1 path).
+
+Edge Function body options (same secret as pairing):
+
+| Body | Effect |
+|------|--------|
+| `{ "windowId": "...", "mode": "plan" }` | Score + create reservations |
+| `{ "action": "commit", "reservationId": "..." }` | Commit one reservation |
+| `{ "action": "expire" }` | Expire stale pending rows |
+| `{ "windowId": "...", "action": "report" }` | List reservations for window |
+| `{ "windowId": "...", "action": "seedActiveDate", "userAId": "...", "userBId": "...", "secondsRemaining": 30 }` | Dev: active date ending soon |
+| `{ "action": "endSpeedDate", "speedDateId": "..." }` | Dev: complete date + return users to waiting |
+
+### Testing Available Soon (Phase 2)
+
+Requires migrations **013 + 014** and redeployed `pair-live-windows`.
+
+Scenario: User A waiting, Users B+C on active dates ending soon (with each other or separate partners).
+
+```js
+const windowId = await SpeedSparkMatchingDev.seedReservationTestWindow()
+
+// B and C on an active date with ~30s left (server backdates started_at)
+const speedDateId = await SpeedSparkMatchingDev.seedActiveDatesEndingSoon(windowId, 'USER_B', 'USER_C', 30)
+
+// A joins queue normally
+await SpeedSparkMatchingDev.simulateQueuePopulation(windowId, ['USER_A'])
+
+// Plan — should reserve A+B or A+C (available-soon), not commit until available
+await SpeedSparkMatchingDev.planReservationsWithAvailableSoon(windowId)
+await SpeedSparkMatchingDev.printReservationReport(windowId)
+
+// Commit before date ends should fail (user still active)
+await SpeedSparkMatchingDev.commitTestReservation('RESERVATION_UUID')
+
+// Fast-forward: end active date, both users return to waiting
+await SpeedSparkMatchingDev.completeActiveDateForTesting(speedDateId)
+
+// Or one-shot: complete dates then commit
+await SpeedSparkMatchingDev.commitReservationAfterAvailability('RESERVATION_UUID', [speedDateId])
+```
+
+Logs to watch in Metro: `matchingData.serverBundle`, `reservation.plan.availableSoonFound`, `orchestration.runLogged`, `orchestration.report`.
+
+### Orchestration metrics (Phase 3)
+
+After plan/commit/expire activity:
+
+```js
+await SpeedSparkMatchingDev.printOrchestrationReport(windowId)
+await SpeedSparkMatchingDev.printReservationMetrics(windowId)
+```
+
+Confirm structured metrics in **Table Editor** → `pairing_run_logs.details` (`runMode`, `reservationSuccessRate`, `commitFailureReasonCounts`, etc.).
+
 ## 9. Testing feedback & mutual matches
 
 After both users complete the same speed date (pair → Active Date → timer ends):
@@ -205,14 +302,19 @@ supabase db push
 | `matchingService.ts` | compatibility score + filters |
 | `matchingData.ts` | load profiles/prefs for waiting users |
 | `pairingEngine.ts` | greedy pairing + RPC apply |
-| `pairingCoordinator.ts` | scan live windows, locks, run logs |
+| `orchestrationMetrics.ts` | run metrics, reservation rollup, dev reports |
+| `pairingRunLog.ts` | persist immediate / plan / commit / expire runs |
+| `pairingCoordinator.ts` | scan live windows, locks, run logs; optional reservation plan |
+| `queueOrchestrator.ts` | `planPairsForWindow` — reservations without immediate commit |
+| `reservationService.ts` | create / expire / cancel / commit reservation RPCs |
 | `autoPairingWorker.ts` | in-app interval worker |
 | `speedDates.ts` | active speed date reads + RPC |
 | `dateFeedback.ts` | submit feedback, resolve mutual match |
 | `messages.ts` | match list, threads, send message |
 | `windows.ts` | speed date windows CRUD/read |
 | `realtimeSubscriptions.ts` | queue + speed date + feedback + match + message channels |
-| `dev/matchingDev.ts` | seed window, simulate queue, run pairing |
+| `dev/matchingDev.ts` | seed window, simulate queue, run pairing, reservation dev helpers |
+| `dev/reservationDev.ts` | reservation plan/commit/expire/report (also `SpeedSparkReservationDev`) |
 
 ## 12. Profile photos
 

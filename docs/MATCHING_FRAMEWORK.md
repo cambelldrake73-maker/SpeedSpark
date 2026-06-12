@@ -228,6 +228,20 @@ Casey previously rated **Pat** attractiveness **9/10** → `appearanceFit` = 90 
 
 ---
 
+## Adaptive wait thresholds (orchestration layer)
+
+Matching **categories and weights are unchanged**. After hard gates produce compatible pairs, queue orchestration may reject pairs whose **mutual score** is below an adaptive floor.
+
+| Layer | Relaxes with wait time? |
+|-------|-------------------------|
+| Hard gates (`collectHardBlockers`) | **Never** |
+| Category scoring (`scoreCategory`) | **Never** |
+| Minimum mutual score (`waitPolicy.ts`) | **Yes** — pool size + wait time |
+
+Implementation: `src/services/waitPolicy.ts`, applied in `pairingEngine.ts` and `queueOrchestrator.ts` only. See [QUEUE_ORCHESTRATION_V2.md](./QUEUE_ORCHESTRATION_V2.md) §5 for the threshold matrix.
+
+---
+
 ## Implementation map
 
 | Concern | File |
@@ -236,8 +250,9 @@ Casey previously rated **Pat** attractiveness **9/10** → `appearanceFit` = 90 
 | Priority weights | `src/constants/matchingPriorities.ts` |
 | Appearance scores | `src/services/matchingAppearance.ts`, `src/constants/matchingScoring.ts` |
 | Greedy pairing | `src/services/pairingEngine.ts` |
+| Wait policy (soft floor) | `src/services/waitPolicy.ts` |
 | Server bundle | `src/services/matchingDataServer.ts` + RPC `get_window_matching_context` |
-| Dev tests | `src/services/dev/matchingFrameworkTests.ts` |
+| Dev tests | `src/services/dev/matchingFrameworkTests.ts`, `waitPolicyTests.ts` |
 
 ## Testing
 
@@ -245,6 +260,8 @@ In Metro dev console:
 
 ```javascript
 await SpeedSparkMatchingDev.runMatchingFrameworkTests()
+await SpeedSparkMatchingDev.testWaitPolicy()
+await SpeedSparkMatchingDev.printWaitPolicyTable()
 ```
 
 See test file for assertions covering gender gates, bidirectional prefs, priority weighting, and appearance privacy.

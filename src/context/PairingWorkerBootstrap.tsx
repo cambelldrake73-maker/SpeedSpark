@@ -5,6 +5,8 @@ import { startAutoPairingWorker, stopAutoPairingWorker } from '../services/autoP
 
 if (__DEV__) {
   require('../services/dev/matchingDev');
+  require('../services/dev/reservationDev');
+  require('../services/dev/waitPolicyTests');
 }
 
 /**

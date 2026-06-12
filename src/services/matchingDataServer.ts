@@ -1,5 +1,5 @@
 import type { DatingPreferences, UserProfile } from '../types';
-import type { MatchCandidate } from '../types/matchingBackend';
+import type { CandidateAvailability, MatchCandidate } from '../types/matchingBackend';
 import { logSupabaseRequest, throwSupabaseError } from '../utils/supabaseDebug';
 import { resolveDbClient } from './dbClient';
 import { logBackendInfo } from './backendLogger';
@@ -8,9 +8,13 @@ import type { MatchingContext } from './matchingService';
 interface WindowMatchingContextRpc {
   windowId: string;
   entries: Array<{
-    queueEntryId: string;
+    queueEntryId: string | null;
     userId: string;
     joinedAt: string;
+    availability?: CandidateAvailability;
+    speedDateId?: string | null;
+    secondsUntilAvailable?: number;
+    currentPartnerId?: string | null;
     profile: UserProfile;
     preferences: Partial<DatingPreferences>;
   }>;
@@ -22,6 +26,20 @@ interface WindowMatchingContextRpc {
 
 function pairKey(userAId: string, userBId: string): string {
   return [userAId, userBId].sort().join(':');
+}
+
+function mapRpcEntry(entry: WindowMatchingContextRpc['entries'][number]): MatchCandidate {
+  return {
+    userId: entry.userId,
+    queueEntryId: entry.queueEntryId ?? '',
+    joinedAt: entry.joinedAt,
+    profile: entry.profile,
+    preferences: entry.preferences ?? {},
+    availability: entry.availability ?? 'waiting',
+    speedDateId: entry.speedDateId ?? null,
+    secondsUntilAvailable: entry.secondsUntilAvailable ?? 0,
+    currentPartnerId: entry.currentPartnerId ?? null,
+  };
 }
 
 export async function loadWindowMatchingBundle(windowId: string): Promise<{
@@ -41,14 +59,9 @@ export async function loadWindowMatchingBundle(windowId: string): Promise<{
   }
 
   const bundle = data as WindowMatchingContextRpc;
-
-  const candidates: MatchCandidate[] = (bundle.entries ?? []).map((entry) => ({
-    userId: entry.userId,
-    queueEntryId: entry.queueEntryId,
-    joinedAt: entry.joinedAt,
-    profile: entry.profile,
-    preferences: entry.preferences ?? {},
-  }));
+  const candidates = (bundle.entries ?? []).map(mapRpcEntry);
+  const waitingCount = candidates.filter((c) => c.availability === 'waiting').length;
+  const availableSoonCount = candidates.filter((c) => c.availability === 'available_soon').length;
 
   const blockedByUser = new Map<string, Set<string>>();
   for (const edge of bundle.blockedEdges ?? []) {
@@ -75,6 +88,15 @@ export async function loadWindowMatchingBundle(windowId: string): Promise<{
   logBackendInfo('matchingData.serverBundle', {
     windowId,
     candidates: candidates.length,
+    waitingCandidates: waitingCount,
+    availableSoonCandidates: availableSoonCount,
+    availableSoonUsers: candidates
+      .filter((c) => c.availability === 'available_soon')
+      .map((c) => ({
+        userId: c.userId,
+        secondsUntilAvailable: c.secondsUntilAvailable,
+        speedDateId: c.speedDateId,
+      })),
     blockedEdges: bundle.blockedEdges?.length ?? 0,
     reportedPairs: bundle.reportedPairKeys?.length ?? 0,
     recentPairs: bundle.recentPairKeys?.length ?? 0,
@@ -82,6 +104,23 @@ export async function loadWindowMatchingBundle(windowId: string): Promise<{
   });
 
   return { candidates, matchingContext, blockedByUser };
+}
+
+/** Waiting users only — for immediate pairing via apply_queue_pair. */
+export function waitingCandidatesOnly(candidates: MatchCandidate[]): MatchCandidate[] {
+  return candidates.filter((c) => c.availability === 'waiting');
+}
+
+export function blockedIdsForCandidate(
+  blockedByUser: Map<string, Set<string>>,
+  candidate: MatchCandidate,
+  candidateIds: string[],
+): Set<string> {
+  const ids = blockedIdsForUser(blockedByUser, candidate.userId, candidateIds);
+  if (candidate.availability === 'available_soon' && candidate.currentPartnerId) {
+    ids.add(candidate.currentPartnerId);
+  }
+  return ids;
 }
 
 export type WindowMatchingBundle = Awaited<ReturnType<typeof loadWindowMatchingBundle>>;
