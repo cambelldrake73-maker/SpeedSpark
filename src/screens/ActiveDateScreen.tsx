@@ -23,8 +23,10 @@ const PIP_MARGIN = 8;
 export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
   const { partner, speedDateId } = route.params;
   const { blockUser, setCurrentDatePartner, currentUser } = useApp();
-  const [secondsLeft, setSecondsLeft] = useState(DATE_DURATION_SECONDS);
   const hasEndedRef = useRef(false);
+  const noShowHandledRef = useRef(false);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(DATE_DURATION_SECONDS);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
   const [selfExpanded, setSelfExpanded] = useState(false);
@@ -78,9 +80,25 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     Boolean(currentUser.id) &&
     currentUser.id !== 'user-1';
 
+  const onPartnerAbandonedRef = useRef<() => void>(() => {});
+
+  const handleNoShow = useCallback(() => {
+    if (noShowHandledRef.current || hasEndedRef.current) {
+      return;
+    }
+    noShowHandledRef.current = true;
+    hasEndedRef.current = true;
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'SpeedDateLobby' }],
+    });
+  }, [navigation]);
+
   const {
     connectionState: voiceConnectionState,
     partnerConnected,
+    partnerConnectionStatus,
+    shouldStartTimer: callShouldStartTimer,
     isMuted: voiceMuted,
     setMuted: setVoiceMuted,
     leave: leaveVoiceCall,
@@ -88,7 +106,13 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     speedDateId,
     userId: currentUser.id,
     enabled: voiceCallEnabled,
+    onNoShow: handleNoShow,
+    onPartnerAbandoned: () => {
+      onPartnerAbandonedRef.current();
+    },
   });
+
+  const shouldStartTimer = speedDateId ? callShouldStartTimer : true;
 
   const [localMuted, setLocalMuted] = useState(false);
   const isVoiceMuted = speedDateId ? voiceMuted : localMuted;
@@ -128,13 +152,17 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
     hasEndedRef.current = true;
 
     if (speedDateId) {
-      await leaveVoiceCall('complete');
+      if (timerRunning) {
+        await leaveVoiceCall('complete');
+      } else {
+        await leaveVoiceCall('cancel');
+      }
     }
 
     const dateId = speedDateId ?? `date-${Date.now()}`;
 
     if (speedDateId) {
-      void updateSpeedDateStatus(speedDateId, 'completed').catch((error) => {
+      void updateSpeedDateStatus(speedDateId, timerRunning ? 'completed' : 'cancelled').catch((error) => {
         console.log('[SpeedSpark Pair] Failed to mark speed date completed', error);
       });
     }
@@ -143,9 +171,28 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
       partnerId: partner.id,
       dateId,
     });
-  }, [navigation, partner.id, speedDateId, leaveVoiceCall]);
+  }, [navigation, partner.id, speedDateId, leaveVoiceCall, timerRunning]);
 
   useEffect(() => {
+    onPartnerAbandonedRef.current = () => {
+      if (hasEndedRef.current) {
+        return;
+      }
+      void goToFeedback();
+    };
+  }, [goToFeedback]);
+
+  useEffect(() => {
+    if (shouldStartTimer && !timerRunning) {
+      setTimerRunning(true);
+    }
+  }, [shouldStartTimer, timerRunning]);
+
+  useEffect(() => {
+    if (!timerRunning) {
+      return;
+    }
+
     if (secondsLeft <= 0) {
       goToFeedback();
       return;
@@ -153,7 +200,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
 
     const timer = setTimeout(() => setSecondsLeft((s) => s - 1), 1000);
     return () => clearTimeout(timer);
-  }, [secondsLeft, goToFeedback]);
+  }, [secondsLeft, timerRunning, goToFeedback]);
 
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = secondsLeft % 60;
@@ -292,6 +339,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
             voiceMode={Boolean(speedDateId)}
             partnerConnected={partnerConnected}
             connectionState={voiceConnectionState}
+            partnerConnectionStatus={partnerConnectionStatus}
           />
         )}
 
@@ -384,6 +432,7 @@ export function ActiveDateScreen({ navigation, route }: ActiveDateScreenProps) {
             voiceMode={Boolean(speedDateId)}
             partnerConnected={partnerConnected}
             connectionState={voiceConnectionState}
+            partnerConnectionStatus={partnerConnectionStatus}
           />
         </DraggableVideoPiP>
       ) : null}
@@ -460,18 +509,22 @@ function PartnerVideoPane({
   voiceMode = false,
   partnerConnected = false,
   connectionState = 'idle',
+  partnerConnectionStatus = 'waiting',
 }: {
   compact?: boolean;
   voiceMode?: boolean;
   partnerConnected?: boolean;
   connectionState?: string;
+  partnerConnectionStatus?: string;
 }) {
   const paneSub = voiceMode
     ? partnerConnected
       ? 'Voice connected'
-      : connectionState === 'connecting' || connectionState === 'reconnecting'
-        ? 'Connecting voice…'
-        : 'Waiting for date…'
+      : partnerConnectionStatus === 'reconnecting' || connectionState === 'reconnecting'
+        ? 'Reconnecting voice…'
+        : connectionState === 'connecting' || partnerConnectionStatus === 'connecting'
+          ? 'Connecting voice…'
+          : 'Waiting for date…'
     : 'Live video';
 
   return (

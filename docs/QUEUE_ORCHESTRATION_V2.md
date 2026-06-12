@@ -1,6 +1,6 @@
 # SpeedSpark Queue Orchestration v2
 
-**Status:** Phase 4 implemented (adaptive wait thresholds)  
+**Status:** Phase 5 implemented (LiveKit call orchestration)  
 **Principle:** Plan early, commit late  
 **Last updated:** 2026-06-02
 
@@ -373,44 +373,50 @@ UPDATE pair_reservations SET status = 'expired' or 'cancelled'
 
 ---
 
-## 9. Call orchestration
+## 9. Call orchestration (Phase 5 — implemented)
 
-Ideal sequence after commit (aligns with [VIDEO_INTEGRATION_PLAN.md](./VIDEO_INTEGRATION_PLAN.md) — LiveKit recommended):
+Sequence after commit (aligns with [VIDEO_INTEGRATION_PLAN.md](./VIDEO_INTEGRATION_PLAN.md)):
 
 ```
 reservation committed
    ↓
 speed_dates row created (apply_queue_pair)
    ↓
-create-call-room Edge Function (service role)
+create-call-room (on ActiveDate mount — idempotent)
    ↓
-tokens issued to user_a_id, user_b_id
+get-call-token → LiveKit connect
    ↓
-Client Realtime sees speed_dates INSERT (existing useSpeedDatePairDetection)
+mark_call_participant_joined (each user on connect)
    ↓
-Navigate ActiveDate (unchanged — no UI redesign)
+Both in room → both_joined_at set → shouldStartTimer = true
    ↓
-Both users join LiveKit room
-   ↓
-Timer starts when BOTH connected (not on navigate)
-   ↓
-Grace period 30–45s if partner missing
-   ↓
-If partner never joins: cancel date, return waiting user to queue
+45s join grace if partner missing → cancel_call_no_show → lobby (no feedback)
 ```
 
 ### Timer policy
 
-| Event | Today | v2 target |
-|-------|-------|-----------|
-| Timer start | On ActiveDate mount | When **both** participants signal `connected` in room |
-| Grace period | None | 30–45s wait for partner join |
-| Partner no-show | User stuck in UI | `speed_dates.status = cancelled`; waiting user → `waiting`; no-show user → `left` or penalized |
+| Event | Behavior |
+|-------|----------|
+| Timer start | When **both** participants connected (`shouldStartTimer`) |
+| Join grace | **45s** — then `cancel_call_no_show` |
+| Partner no-show | `speed_dates.status = cancelled`; joined user → `waiting`; no-show user → `left` |
+| Mid-call disconnect | **20s** reconnect grace; then partner-abandoned → feedback |
+| End early before both join | Cancel call; no feedback required |
+
+### RPCs (`015_call_orchestration.sql`)
+
+| RPC | Purpose |
+|-----|---------|
+| `mark_call_participant_joined` | Record join; set `both_joined_at` when both present |
+| `mark_call_participant_left` | Record leave timestamp |
+| `cancel_call_no_show` | Grace timeout; return joined user to queue |
+| `complete_call_if_valid` | Complete only if `both_joined_at` set |
+| `get_call_orchestration_state` | Read call state for sync |
 
 ### Call readiness vs UI
 
-- **No new screens** — token fetch happens in existing `ActiveDate` / hook layer
-- Connection chip should eventually reflect **call** connected, not just camera permission (video plan)
+- **No new screens** — orchestration in `useSpeedDateCall` + ActiveDate timer gate
+- Partner pane subtext reflects connecting / waiting / connected (layout unchanged)
 
 ---
 
@@ -511,11 +517,13 @@ Beta minimum: log to `pairing_run_logs.details` until dashboard exists.
 - Metrics: `waitBucket`, `poolBucket`, `minimumScoreApplied`, threshold reject counts
 - Dev: `SpeedSparkMatchingDev.testWaitPolicy()`, `printWaitPolicyTable()`
 
-### Phase 5 — Call orchestration (coordinates with video plan)
+### Phase 5 — Call orchestration (implemented)
 
-- `create-call-room` Edge Function
-- Both-join timer + grace cancel RPC
-- Hook changes in `useSpeedDateCall` — **no layout changes**
+- Migration `015_call_orchestration.sql` — join/leave timestamps, both-join timer RPCs
+- RPCs: `mark_call_participant_joined`, `mark_call_participant_left`, `cancel_call_no_show`, `complete_call_if_valid`
+- `get-call-token` no longer marks call active on token issue — active only when both join
+- `useSpeedDateCall` — `shouldStartTimer`, join grace (45s), reconnect grace (20s)
+- ActiveDate timer starts when `shouldStartTimer === true`; no-show → lobby (no feedback)
 
 ---
 

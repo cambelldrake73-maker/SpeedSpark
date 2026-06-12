@@ -39,7 +39,7 @@ Both functions require a **valid user JWT** (default Supabase verify). The app c
 
 ## 4. Database migration
 
-Run `supabase/migrations/010_speed_date_calls.sql` after `009`.
+Run `supabase/migrations/010_speed_date_calls.sql` after `009`, then `015_call_orchestration.sql` after `014`.
 
 ## 5. Native development build (iOS / Android)
 
@@ -74,15 +74,17 @@ Two browser profiles / incognito windows → two accounts → join queue → Act
 
 ## 7. End-to-end test
 
-1. Apply migration `010`.
+1. Apply migrations `010` and `015`.
 2. Deploy both call Edge Functions with LiveKit secrets.
 3. Pair two users (existing queue + pairing flow).
 4. Both land on ActiveDate with a real `speedDateId`.
 5. Allow microphone on both sides.
-6. Status chip: **Voice connected**; partner pane: **On call**.
-7. Speak — audio should pass through LiveKit (no video tracks in Phase 1).
-8. Timer ends → feedback screen unchanged.
-9. Verify `speed_date_calls.status = completed` in Table Editor.
+6. **Timer stays at full duration** until both connect (partner pane: “Waiting for date…”).
+7. When both join → timer counts down; status: **Voice connected**.
+8. Speak — audio passes through LiveKit (voice-only Phase 1).
+9. Timer ends → feedback screen unchanged.
+10. **No-show test:** one user joins, wait 45s → joined user returns to lobby (no feedback); `cancel_reason = no_show`.
+11. Verify `speed_date_calls.both_joined_at` and `status = completed` after valid dates.
 
 ## 8. Logs
 
@@ -92,6 +94,13 @@ Metro / browser console:
 [SpeedSpark Backend] call.room.joining
 [SpeedSpark Backend] call.room.joined
 [SpeedSpark Backend] call.room.participant.joined
+[SpeedSpark Backend] call.participant.joined.rpc
+[SpeedSpark Backend] call.both.joined
+[SpeedSpark Backend] call.timer.started
+[SpeedSpark Backend] call.no_show.cancelled
+[SpeedSpark Backend] call.room.reconnecting
+[SpeedSpark Backend] call.room.reconnected
+[SpeedSpark Backend] call.completed
 [SpeedSpark Backend] call.room.left
 ```
 
@@ -121,9 +130,11 @@ ActiveDate mount
   → create-call-room (Edge Fn, user JWT)
        → LiveKit CreateRoom + speed_date_calls row
   → get-call-token (Edge Fn, user JWT)
-       → JWT minted server-side
+       → JWT minted server-side (call stays pending until both join)
   → Room.connect(url, token) — audio publish/subscribe only
-  → leave on end/block/report → complete_speed_date_call RPC
+  → mark_call_participant_joined RPC on connect
+  → both joined → timer starts (ActiveDate)
+  → leave on end/block/report → complete_call_if_valid / cancel RPCs
 ```
 
 See also: [VIDEO_INTEGRATION_PLAN.md](./VIDEO_INTEGRATION_PLAN.md) · [CLOSED_BETA_CHECKLIST.md](./CLOSED_BETA_CHECKLIST.md) · [EAS_BUILD_READINESS.md](./EAS_BUILD_READINESS.md)

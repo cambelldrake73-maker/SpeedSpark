@@ -143,9 +143,11 @@ export async function compareDevMatchScores(userAId: string, userBId: string) {
 
 export { runMatchingFrameworkTests } from './matchingFrameworkTests';
 export { runWaitPolicyTests, printWaitPolicyTable } from './waitPolicyTests';
+export { runCallOrchestrationTests } from './callOrchestrationTests';
 
 if (__DEV__) {
   const reservationDev = require('./reservationDev') as typeof import('./reservationDev');
+  const { runCallOrchestrationTests } = require('./callOrchestrationTests') as typeof import('./callOrchestrationTests');
 
   (globalThis as Record<string, unknown>).SpeedSparkMatchingDev = {
     seedDevLiveWindow,
@@ -169,5 +171,6 @@ if (__DEV__) {
     testWaitPolicy: runWaitPolicyTests,
     runWaitPolicyTests,
     printWaitPolicyTable,
+    testCallOrchestration: runCallOrchestrationTests,
   };
 }

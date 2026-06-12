@@ -42,6 +42,7 @@ In the Supabase Dashboard, open **SQL Editor** and run **in order**:
 12. `supabase/migrations/012_dating_intentions.sql`
 13. `supabase/migrations/013_pair_reservations.sql` — Queue Orchestration v2 Phase 1 (pre-match reservations)
 14. `supabase/migrations/014_available_soon_pool.sql` — Phase 2 (Available Soon candidate pool)
+15. `supabase/migrations/015_call_orchestration.sql` — Phase 5 (both-join timer, no-show RPCs)
 
 See [docs/MODERATION.md](../docs/MODERATION.md) for report review and account status workflows.  
 See [docs/LIVEKIT_SETUP.md](../docs/LIVEKIT_SETUP.md) for voice call setup (LiveKit + Edge Functions).  
@@ -333,7 +334,7 @@ After upload, restart or re-open the app — `fetchProfile` loads `profile_photo
 
 | Step | Action |
 |------|--------|
-| Migration | Run `010_speed_date_calls.sql` |
+| Migration | Run `010_speed_date_calls.sql` then `015_call_orchestration.sql` |
 | LiveKit | Create LiveKit Cloud project; set secrets on Supabase |
 | Deploy | `create-call-room`, `get-call-token` Edge Functions |
 | Test | Web: two browsers. Native: EAS dev build (not Expo Go) |

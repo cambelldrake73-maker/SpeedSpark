@@ -6,7 +6,6 @@ import {
   getAuthenticatedUser,
   getLiveKitConfig,
   jsonResponse,
-  markCallActive,
   mintVoiceToken,
 } from '../_shared/callRoom.ts';
 
@@ -52,7 +51,6 @@ Deno.serve(async (req) => {
     }
 
     const { token, expiresAt } = mintVoiceToken(livekit, callRow.room_name, user.id);
-    await markCallActive(admin, speedDateId);
 
     console.log('[get-call-token] issued', {
       speedDateId,

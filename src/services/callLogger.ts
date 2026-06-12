@@ -15,7 +15,20 @@ export type CallLogEvent =
   | 'room.reconnecting'
   | 'room.reconnected'
   | 'room.participant.joined'
-  | 'room.participant.left';
+  | 'room.participant.left'
+  | 'participant.joined.rpc'
+  | 'participant.joined.failed'
+  | 'participant.left.rpc'
+  | 'participant.left.failed'
+  | 'both.joined'
+  | 'timer.started'
+  | 'no_show.cancel.requested'
+  | 'no_show.cancelled'
+  | 'no_show.cancel.failed'
+  | 'complete.requested'
+  | 'completed'
+  | 'complete.failed'
+  | 'partner.abandoned';
 
 export function logCallEvent(event: CallLogEvent, detail?: Record<string, unknown>): void {
   logBackendInfo(`${EVENT_PREFIX}.${event}`, detail);
